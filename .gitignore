@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+openusage_dashboard.html
+.vscode/
