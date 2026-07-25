@@ -1368,8 +1368,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                                 <p class="panel-subtitle">Total tokens by model variant</p>
                             </div>
                         </div>
-                        <div class="chart-wrapper" style="display: flex; align-items: center; justify-content: center;">
-                            <canvas id="modelChartOverview" style="max-height: 250px; max-width: 250px;"></canvas>
+                        <div class="chart-wrapper" style="display: flex; align-items: center; justify-content: center; min-height: 320px;">
+                            <canvas id="modelChartOverview" style="max-height: 420px; min-height: 300px; width: 100%;"></canvas>
                         </div>
                     </div>
                 </div>
@@ -1664,13 +1664,13 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         </div>
                     </div>
                     <div class="three-col-grid">
-                        <div class="chart-wrapper">
+                        <div class="chart-wrapper" style="height: 380px;">
                             <canvas id="modelCompareTokensChart"></canvas>
                         </div>
-                        <div class="chart-wrapper">
+                        <div class="chart-wrapper" style="height: 380px;">
                             <canvas id="modelCompareRequestsChart"></canvas>
                         </div>
-                        <div class="chart-wrapper">
+                        <div class="chart-wrapper" style="height: 380px;">
                             <canvas id="modelCompareCacheChart"></canvas>
                         </div>
                     </div>
@@ -2272,6 +2272,19 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             renderUI();
         }
 
+        function highlightOrFilterModel(modelName) {
+            if (!modelName) return;
+            if (activeFilters.model === modelName) {
+                activeFilters.model = 'all';
+            } else {
+                activeFilters.model = modelName;
+            }
+            const modelSelect = document.getElementById('filter-model');
+            if (modelSelect) modelSelect.value = activeFilters.model;
+            localStorage.setItem('obs_filters', JSON.stringify(activeFilters));
+            renderUI();
+        }
+
         function setDateRange(range) {
             activeFilters.timeframe = range;
             setDateBtnActive(range);
@@ -2630,9 +2643,30 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             });
 
             // Overview Doughnut Chart (Models)
-            const modelsLabels = Object.keys(modelData);
-            const modelsValues = Object.values(modelData);
-            const chartColors = ['#ff7849', '#b9dc75', '#7ed7bd', '#e6a85c', '#ff5f56', '#d7c27d', '#c18f6b', '#687368'];
+            let modelsLabels = [];
+            let modelsValues = [];
+
+            if (isAllDefault && TELEMETRY_DATA.models && TELEMETRY_DATA.models.length > 0) {
+                modelsLabels = TELEMETRY_DATA.models.map(m => m.model_name);
+                modelsValues = TELEMETRY_DATA.models.map(m => m.total_tokens);
+            } else {
+                modelsLabels = Object.keys(modelData);
+                modelsValues = Object.values(modelData);
+            }
+
+            const chartColors = [
+                '#ff7849', '#b9dc75', '#7ed7bd', '#e6a85c', '#ff5f56', '#d7c27d',
+                '#c18f6b', '#a855f7', '#06b6d4', '#ec4899', '#3b82f6', '#10b981',
+                '#f59e0b', '#84cc16', '#6366f1', '#687368'
+            ];
+
+            const sliceColors = modelsLabels.map((lbl, idx) => {
+                const baseColor = chartColors[idx % chartColors.length];
+                if (activeFilters.model !== 'all') {
+                    return lbl === activeFilters.model ? baseColor : 'rgba(100, 116, 139, 0.25)';
+                }
+                return baseColor;
+            });
 
             if (charts.modelOverview) charts.modelOverview.destroy();
             const ctxModel = document.getElementById('modelChartOverview').getContext('2d');
@@ -2642,7 +2676,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     labels: modelsLabels,
                     datasets: [{
                         data: modelsValues,
-                        backgroundColor: chartColors.slice(0, modelsLabels.length),
+                        backgroundColor: sliceColors,
                         borderWidth: 2,
                         borderColor: '#0e121f'
                     }]
@@ -2650,10 +2684,32 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    onClick: function(evt, elements, chart) {
+                        if (elements && elements.length > 0) {
+                            const index = elements[0].index;
+                            const clickedModel = chart.data.labels[index];
+                            highlightOrFilterModel(clickedModel);
+                        }
+                    },
                     plugins: {
                         legend: {
                             position: 'bottom',
-                            labels: { color: '#8b95a5', boxWidth: 10, font: { family: 'Plus Jakarta Sans', size: 9 } }
+                            onClick: function(e, legendItem, legend) {
+                                const clickedModel = legend.chart.data.labels[legendItem.index];
+                                highlightOrFilterModel(clickedModel);
+                            },
+                            labels: {
+                                color: function(ctx) {
+                                    const labelText = ctx.text;
+                                    if (activeFilters.model !== 'all' && activeFilters.model === labelText) {
+                                        return '#ff7a00';
+                                    }
+                                    return '#f0f3f6';
+                                },
+                                boxWidth: 14,
+                                padding: 14,
+                                font: { family: 'Plus Jakarta Sans', size: 13, weight: '600' }
+                            }
                         },
                         tooltip: {
                             backgroundColor: '#0e121f',
@@ -3136,7 +3192,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             });
 
             // Model comparisons charts (bar comparison)
-            const labels = mData.map(m => m.model_name.slice(0, 18));
+            const fullModelNames = mData.map(m => m.model_name);
+            const labels = fullModelNames;
             const tokens = mData.map(m => m.total_tokens);
             const requests = mData.map(m => m.requests);
             const caches = mData.map(m => m.average_cache_hit * 100);
@@ -3150,17 +3207,27 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     datasets: [{
                         label: 'Total Tokens',
                         data: tokens,
-                        backgroundColor: '#b9dc75',
+                        backgroundColor: labels.map(lbl => activeFilters.model !== 'all' ? (lbl === activeFilters.model ? '#b9dc75' : 'rgba(185, 220, 117, 0.25)') : '#b9dc75'),
                         borderRadius: 4
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, title: { display: true, text: 'Tokens Consumed by Model', color: '#f0f3f6' } },
+                    onClick: function(evt, elements, chart) {
+                        if (elements && elements.length > 0) {
+                            const index = elements[0].index;
+                            const clickedModel = fullModelNames[index];
+                            highlightOrFilterModel(clickedModel);
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: true, text: 'Tokens Consumed by Model', color: '#f8fafc', font: { family: 'Plus Jakarta Sans', size: 14, weight: '700' }, padding: { bottom: 12 } }
+                    },
                     scales: {
-                        x: { grid: { color: '#141a29' }, ticks: { color: '#8b95a5', font: { size: 8 } } },
-                        y: { grid: { color: '#141a29' }, ticks: { color: '#8b95a5', font: { size: 8 } } }
+                        x: { grid: { color: '#141a29' }, ticks: { color: '#f0f3f6', font: { family: 'Plus Jakarta Sans', size: 12, weight: '600' }, maxRotation: 45, minRotation: 30 } },
+                        y: { grid: { color: '#141a29' }, ticks: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11, weight: '500' } } }
                     }
                 }
             });
@@ -3174,17 +3241,27 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     datasets: [{
                         label: 'Requests Count',
                         data: requests,
-                        backgroundColor: '#ff7a00',
+                        backgroundColor: labels.map(lbl => activeFilters.model !== 'all' ? (lbl === activeFilters.model ? '#ff7a00' : 'rgba(255, 122, 0, 0.25)') : '#ff7a00'),
                         borderRadius: 4
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, title: { display: true, text: 'API Invocations by Model', color: '#f0f3f6' } },
+                    onClick: function(evt, elements, chart) {
+                        if (elements && elements.length > 0) {
+                            const index = elements[0].index;
+                            const clickedModel = fullModelNames[index];
+                            highlightOrFilterModel(clickedModel);
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: true, text: 'API Invocations by Model', color: '#f8fafc', font: { family: 'Plus Jakarta Sans', size: 14, weight: '700' }, padding: { bottom: 12 } }
+                    },
                     scales: {
-                        x: { grid: { color: '#141a29' }, ticks: { color: '#8b95a5', font: { size: 8 } } },
-                        y: { grid: { color: '#141a29' }, ticks: { color: '#8b95a5', font: { size: 8 } } }
+                        x: { grid: { color: '#141a29' }, ticks: { color: '#f0f3f6', font: { family: 'Plus Jakarta Sans', size: 12, weight: '600' }, maxRotation: 45, minRotation: 30 } },
+                        y: { grid: { color: '#141a29' }, ticks: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11, weight: '500' } } }
                     }
                 }
             });
@@ -3198,17 +3275,27 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     datasets: [{
                         label: 'Cache Hit %',
                         data: caches,
-                        backgroundColor: '#b9dc75',
+                        backgroundColor: labels.map(lbl => activeFilters.model !== 'all' ? (lbl === activeFilters.model ? '#b9dc75' : 'rgba(185, 220, 117, 0.25)') : '#b9dc75'),
                         borderRadius: 4
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, title: { display: true, text: 'Cache Efficiency Ratio (%)', color: '#f0f3f6' } },
+                    onClick: function(evt, elements, chart) {
+                        if (elements && elements.length > 0) {
+                            const index = elements[0].index;
+                            const clickedModel = fullModelNames[index];
+                            highlightOrFilterModel(clickedModel);
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: true, text: 'Cache Efficiency Ratio (%)', color: '#f8fafc', font: { family: 'Plus Jakarta Sans', size: 14, weight: '700' }, padding: { bottom: 12 } }
+                    },
                     scales: {
-                        x: { grid: { color: '#141a29' }, ticks: { color: '#8b95a5', font: { size: 8 } } },
-                        y: { min: 0, max: 100, grid: { color: '#141a29' }, ticks: { color: '#8b95a5', font: { size: 8 } } }
+                        x: { grid: { color: '#141a29' }, ticks: { color: '#f0f3f6', font: { family: 'Plus Jakarta Sans', size: 12, weight: '600' }, maxRotation: 45, minRotation: 30 } },
+                        y: { min: 0, max: 100, grid: { color: '#141a29' }, ticks: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11, weight: '500' } } }
                     }
                 }
             });
