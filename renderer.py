@@ -379,6 +379,10 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             border-color: var(--accent-orange);
         }
 
+        /* Only the selected workspace view belongs in the document flow. */
+        .tab-view { display: none; }
+        .tab-view.active { display: block; }
+
         .date-btns {
             display: flex;
             background-color: var(--bg-sidebar);
@@ -581,6 +585,21 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             .three-col-grid {
                 grid-template-columns: 1fr;
             }
+        }
+
+        @media (max-width: 720px) {
+            :root { --sidebar-width: 0px; --header-height: 62px; }
+            #sidebar {
+                width: 0;
+                transform: translateX(-100%);
+                box-shadow: 18px 0 45px rgba(0,0,0,.45);
+            }
+            #sidebar.mobile-open { width: 260px; transform: translateX(0); }
+            #app-content, body.sidebar-collapsed #app-content { margin-left: 0; }
+            #header { padding: 0 1rem; }
+            #main-view { padding: 1rem; gap: 1rem; }
+            .search-container { max-width: 42vw; }
+            .sidebar-collapse-btn { display: none; }
         }
 
         .chart-wrapper {
@@ -1959,9 +1978,24 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             if (savedTab) {
                 currentTab = savedTab;
             }
+            if (!['overview', 'repositories', 'sessions', 'models', 'tools', 'time', 'git', 'export'].includes(currentTab)) {
+                currentTab = 'overview';
+            }
             
             // Populate select lists
             populateFilterOptions();
+
+            // A previous dashboard version may have persisted filters that no
+            // longer exist. Invalid values make every client-side query return
+            // zero rows, so normalize state against the current payload.
+            const validProjects = new Set(TELEMETRY_DATA.repositories.map(r => r.repository));
+            const validModels = new Set(TELEMETRY_DATA.models.map(m => m.model_name));
+            const validTools = new Set(TELEMETRY_DATA.tools.map(t => t.tool_name));
+            if (activeFilters.project !== 'all' && !validProjects.has(activeFilters.project)) activeFilters.project = 'all';
+            if (activeFilters.model !== 'all' && !validModels.has(activeFilters.model)) activeFilters.model = 'all';
+            if (activeFilters.tool !== 'all' && !validTools.has(activeFilters.tool)) activeFilters.tool = 'all';
+            if (!['all', '24h', '7d', '30d', '90d'].includes(activeFilters.timeframe)) activeFilters.timeframe = 'all';
+            localStorage.setItem('obs_filters', JSON.stringify(activeFilters));
             
             // Sync filter elements value
             document.getElementById('filter-project').value = activeFilters.project;
@@ -1970,6 +2004,9 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             setDateBtnActive(activeFilters.timeframe);
 
             renderUI();
+            // Some browsers restore the page before deferred DOM state settles;
+            // render once more on the next task so cards/charts use live data.
+            setTimeout(renderUI, 0);
             
             // Register Keyboard events
             setupKeyboardShortcuts();
@@ -2064,12 +2101,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             
             // Update sidebar active state
             document.querySelectorAll('.nav-item').forEach(item => {
-                if (item.id === 'nav-' + tabId) {
-                    item.classList.add('active');
-                } else {
-                    item.classList.remove('remove'); // clear active class
-                    item.className = 'nav-item';
-                }
+                item.classList.toggle('active', item.id === 'nav-' + tabId);
             });
 
             // Update main view content panels
@@ -2201,11 +2233,11 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             // Search query filter
             const searchVal = document.getElementById('global-search-input').value.toLowerCase().trim();
             
-            return TELEMETRY_DATA.sessions.flatMap(s => s.timeline.map(turn => ({
-                ...turn,
-                project: s.project,
-                session_id: s.session_id
-            }))).filter(ev => {
+            const sourceEvents = TELEMETRY_DATA.events || TELEMETRY_DATA.sessions.flatMap(s => s.timeline.map(turn => ({
+                ...turn, project: s.project, session_id: s.session_id,
+                tool: turn.tool || 'Unknown'
+            })));
+            return sourceEvents.filter(ev => {
                 // Project filter
                 if (activeFilters.project !== 'all' && ev.project !== activeFilters.project) return false;
                 // Model filter
@@ -2251,12 +2283,20 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 renderTimeAnalytics();
             } else if (currentTab === 'git') {
                 renderGitIntegration();
+            } else if (currentTab === 'export') {
+                // Export is a static panel; keep navigation state functional.
+                document.getElementById('view-export').classList.add('active');
             }
         }
 
         // ================= OVERVIEW RENDERING =================
         function renderOverview() {
-            const filteredEvents = getFilteredRawEvents();
+            let filteredEvents = getFilteredRawEvents();
+            // Never show an empty dashboard when no filters are active. This
+            // also protects against browser autofill/localStorage races.
+            if (!filteredEvents.length && activeFilters.project === 'all' && activeFilters.model === 'all' && activeFilters.tool === 'all' && activeFilters.timeframe === 'all') {
+                filteredEvents = TELEMETRY_DATA.events || [];
+            }
             
             // Recompute stats for current active filters
             let totalTokens = 0;
@@ -3378,6 +3418,41 @@ def generate_html_report(report_data, output_path, watch_mode=False):
     json_str = json_str.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     html_content = html_template.replace("__TELEMETRY_DATA_JSON__", json_str)
     html_content = html_content.replace("__WATCH_MODE_ACTIVE__", "true" if watch_mode else "false")
+
+    # Render the headline cards with real values in the initial HTML. The
+    # browser still recomputes them for filters, but a delayed/failed client
+    # render must never leave the user staring at misleading zero placeholders.
+    overview = report_data.get("global_overview", {})
+    def compact_number(value):
+        value = value or 0
+        if value >= 1_000_000_000: return f"{value / 1_000_000_000:.2f}B"
+        if value >= 1_000_000: return f"{value / 1_000_000:.2f}M"
+        if value >= 1_000: return f"{value / 1_000:.1f}k"
+        return f"{value:,}"
+    initial_metrics = {
+        "stat-total-tokens": compact_number(overview.get("total_tokens")),
+        "stat-input-tokens": compact_number(overview.get("total_input")),
+        "stat-output-tokens": compact_number(overview.get("total_output")),
+        "stat-cached-tokens": compact_number(overview.get("cached_tokens")),
+        "stat-cache-hit-pct": f"{overview.get('cache_hit_pct', 0):.1f}%",
+        "stat-cost": f"${overview.get('estimated_cost', 0):.2f}",
+        "stat-savings": f"${overview.get('estimated_savings', 0):.2f}",
+        "stat-sessions": f"{overview.get('sessions_count', 0):,}",
+        "stat-requests": f"{overview.get('requests_count', 0):,}",
+        "stat-active-repos": f"{overview.get('active_repositories_count', 0):,}",
+        "stat-active-models": f"{overview.get('active_models_count', 0):,}",
+        "stat-active-tools": f"{overview.get('active_tools_count', 0):,}",
+    }
+    for element_id, value in initial_metrics.items():
+        html_content = html_content.replace(
+            f'id="{element_id}">0</', f'id="{element_id}">{value}</'
+        ).replace(
+            f'id="{element_id}">0.0</', f'id="{element_id}">{value}</'
+        ).replace(
+            f'id="{element_id}">0%</', f'id="{element_id}">{value}'
+        ).replace(
+            f'id="{element_id}">$0.00</', f'id="{element_id}">{value}</'
+        )
     
     with open(output_path, "w", encoding='utf-8') as f:
         f.write(html_content)

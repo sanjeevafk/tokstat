@@ -167,6 +167,21 @@ def compute_analytics():
     if not events:
         return {}
 
+    # Preserve valid usage events that have no session; the browser needs these
+    # for complete totals and filtering.
+    client_events = [{
+        "event_id": e.get("event_id"), "occurred_at": e.get("occurred_at"),
+        "project": e.get("workspace_id") or "Global/No Project",
+        "session_id": e.get("session_id") or "Global/No Session",
+        "turn_id": e.get("turn_id"), "model": e.get("model_raw") or "System/Tools",
+        "tool": e.get("agent_name") or "Unknown", "input": e.get("input_tokens", 0),
+        "output": e.get("output_tokens", 0), "cache_read": e.get("cache_read_tokens", 0),
+        "total": e.get("total_tokens", 0), "requests": e.get("requests", 1),
+        "cost": utils.estimate_token_cost_and_savings(
+            e.get("model_raw"), e.get("input_tokens", 0), e.get("output_tokens", 0),
+            e.get("cache_read_tokens", 0))[0]
+    } for e in events]
+
     # Initialize aggregators
     total_input = 0
     total_output = 0
@@ -618,6 +633,7 @@ def compute_analytics():
         },
         "repositories": repositories_list,
         "sessions": sessions_list,
+        "events": client_events,
         "models": models_list,
         "tools": tools_list,
         "time_analytics": {

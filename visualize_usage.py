@@ -87,7 +87,7 @@ def generate_dashboard(watch_mode=False, server_port=5000):
                 "largest_session": None, "longest_session_duration": 0, "longest_session_id": "N/A",
                 "peak_usage_day": "N/A", "peak_usage_tokens": 0, "estimated_cost": 0.0, "estimated_savings": 0.0
             },
-            "repositories": [], "sessions": [], "models": [], "tools": [],
+            "repositories": [], "sessions": [], "events": [], "models": [], "tools": [],
             "time_analytics": {
                 "daily_timeline": [], "weekday_heatmap": {}, "hourly_heatmap": {}, "weekday_totals": {},
                 "monthly_trends": [], "busiest_coding_day": "N/A", "longest_uninterrupted_coding_session_sec": 0

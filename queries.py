@@ -24,7 +24,7 @@ QUERY_ALL_EVENTS = """
     FROM usage_events
     WHERE occurred_at IS NOT NULL
       AND event_type = 'message_usage'
-      AND (input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)
+      AND total_tokens > 0
     ORDER BY occurred_at ASC
 """
 
@@ -42,6 +42,8 @@ QUERY_DAILY_ROLLUP = """
         count(*) as requests
     FROM usage_events
     WHERE occurred_at IS NOT NULL
+      AND event_type = 'message_usage'
+      AND total_tokens > 0
     GROUP BY day, project, agent, model
     ORDER BY day ASC
 """
@@ -57,7 +59,7 @@ QUERY_PROJECTS_BREAKDOWN = """
         count(distinct coalesce(session_id, 'No Session')) as sessions
     FROM usage_events
     WHERE event_type = 'message_usage'
-      AND (input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)
+      AND total_tokens > 0
     GROUP BY project
     ORDER BY total DESC
 """
@@ -74,6 +76,8 @@ QUERY_SESSIONS_BREAKDOWN = """
         sum(coalesce(total_tokens, 0)) as total,
         count(*) as requests
     FROM usage_events
+    WHERE event_type = 'message_usage'
+      AND total_tokens > 0
     GROUP BY project, session
     ORDER BY start_time DESC
 """
@@ -87,5 +91,7 @@ QUERY_TOOL_TOTALS = """
         sum(coalesce(total_tokens, 0)) as total,
         count(*) as requests
     FROM usage_events
+    WHERE event_type = 'message_usage'
+      AND total_tokens > 0
     GROUP BY agent
 """
