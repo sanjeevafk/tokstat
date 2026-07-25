@@ -17,7 +17,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -37,14 +37,14 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             
             --accent-orange: #ff7a00;
             --accent-orange-glow: rgba(255, 122, 0, 0.15);
-            --accent-emerald: #10b981;
-            --accent-emerald-glow: rgba(16, 185, 129, 0.12);
-            --accent-cyan: #06b6d4;
-            --accent-cyan-glow: rgba(6, 182, 212, 0.12);
-            --accent-purple: #8b5cf6;
-            --accent-purple-glow: rgba(139, 92, 246, 0.12);
-            --accent-blue: #1f6feb;
-            --accent-blue-glow: rgba(31, 111, 235, 0.12);
+            --accent-emerald: #b9dc75;
+            --accent-emerald-glow: rgba(185, 220, 117, 0.12);
+            --accent-cyan: #7ed7bd;
+            --accent-cyan-glow: rgba(126, 215, 189, 0.12);
+            --accent-purple: #b9dc75;
+            --accent-purple-glow: rgba(185, 220, 117, 0.12);
+            --accent-blue: #7ed7bd;
+            --accent-blue-glow: rgba(126, 215, 189, 0.12);
             --accent-red: #f85149;
             
             --sidebar-width: 260px;
@@ -1011,6 +1011,88 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             width: 48px;
             height: 48px;
             stroke: var(--text-muted);
+        }
+        /* Industrial telemetry console: graphite, signal orange, oxidized green. */
+        :root {
+            --bg-base: #090b0a;
+            --bg-sidebar: #0d100e;
+            --bg-card: #111512;
+            --bg-card-hover: #171c17;
+            --bg-header: #0a0d0b;
+            --border-color: #263027;
+            --border-highlight: #536451;
+            --text-primary: #f2eee4;
+            --text-secondary: #a6ada0;
+            --text-muted: #687368;
+            --accent-orange: #ff7849;
+            --accent-orange-glow: rgba(255, 120, 73, .14);
+            --accent-emerald: #b9dc75;
+            --accent-emerald-glow: rgba(185, 220, 117, .12);
+            --accent-cyan: #7ed7bd;
+            --accent-cyan-glow: rgba(126, 215, 189, .12);
+            --accent-purple: #b9dc75;
+            --accent-purple-glow: rgba(185, 220, 117, .12);
+            --accent-blue: #b9dc75;
+            --accent-red: #ff5f56;
+        }
+
+        * { font-family: 'IBM Plex Mono', monospace; }
+        body {
+            background-color: var(--bg-base);
+            background-image: linear-gradient(rgba(185,220,117,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(185,220,117,.025) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+        h1, h2, h3, .brand-text h1, .panel-title, .metric-value { font-family: 'Syne', sans-serif; }
+        ::-webkit-scrollbar-thumb { background: #344036; border-radius: 0; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--accent-emerald); }
+        #sidebar { background: rgba(13,16,14,.96); border-right: 1px solid var(--border-color); }
+        #app-content { background: linear-gradient(180deg, rgba(9,11,10,.2), rgba(9,11,10,.8)); }
+        #header { background: rgba(10,13,11,.92); border-bottom: 1px solid var(--border-color); backdrop-filter: blur(14px); }
+        #main-view { max-width: 1760px; padding: 1.5rem 2rem 3rem; gap: 1.25rem; }
+        .brand-container { padding: 1.35rem 1.15rem; }
+        .logo-box { width: 34px; height: 34px; border-radius: 6px; background: var(--accent-orange); box-shadow: 4px 4px 0 #5c2a1b; }
+        .logo-box svg { fill: #17100c; }
+        .brand-text h1 { letter-spacing: -.04em; text-transform: uppercase; }
+        .brand-text p, .panel-subtitle { letter-spacing: .02em; }
+        .nav-list { padding: 1.25rem .7rem; gap: .35rem; }
+        .nav-item a { border-radius: 3px; padding: .7rem .8rem; font-size: .76rem; letter-spacing: .02em; }
+        .nav-item.active a { background: var(--accent-orange); color: #1b100b; box-shadow: 4px 4px 0 rgba(255,120,73,.18); }
+        .nav-item.active svg { stroke: #1b100b; }
+        .breadcrumbs { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; }
+        .search-container { width: 300px; }
+        .search-container input { background: #0c100d; border-radius: 3px; font-size: .7rem; }
+        .live-status { border-radius: 3px; text-transform: uppercase; letter-spacing: .08em; font-size: .62rem; }
+        .filter-bar { background: #0f130f; border-radius: 3px; border-color: var(--border-color); padding: .65rem .85rem; box-shadow: 0 1px 0 rgba(255,255,255,.03); }
+        .filter-label { font-size: .62rem; letter-spacing: .1em; color: var(--text-muted); }
+        .filter-select, .date-btns { background: #0a0d0b; border-radius: 2px; font-size: .68rem; }
+        .date-btn { font-size: .65rem; border-radius: 1px; }
+        .date-btn.active { background: var(--accent-orange); color: #1b100b; }
+        .clear-filters-btn { border-radius: 2px; font-size: .65rem; }
+        .metrics-grid { gap: .7rem; }
+        .metric-card { background: rgba(17,21,18,.92); border-radius: 3px; border-color: var(--border-color); padding: 1rem; min-height: 126px; box-shadow: inset 0 1px 0 rgba(255,255,255,.025); }
+        .metric-card:hover { border-color: var(--accent-emerald); transform: translateY(-2px); }
+        .metric-header { font-size: .62rem; letter-spacing: .1em; }
+        .metric-value { font-size: 1.8rem; letter-spacing: -.06em; color: var(--text-primary); }
+        .metric-footer { font-size: .62rem; }
+        .card-glow-orange::before, .card-glow-purple::before, .card-glow-emerald::before, .card-glow-cyan::before { width: 3px; }
+        .card-glow-purple::before { background: var(--accent-emerald); }
+        .card-glow-cyan::before { background: var(--accent-cyan); }
+        .panel-card { background: rgba(17,21,18,.9); border-radius: 3px; border-color: var(--border-color); padding: 1.15rem; gap: 1rem; box-shadow: inset 0 1px 0 rgba(255,255,255,.025); }
+        .panel-header { border-bottom-color: var(--border-color); padding-bottom: .65rem; }
+        .panel-title { font-size: .95rem; letter-spacing: -.02em; }
+        .table-wrapper { border: 1px solid rgba(38,48,39,.55); }
+        table { font-size: .7rem; }
+        th { padding: .7rem .8rem; font-size: .6rem; letter-spacing: .1em; background: #0d110e; color: var(--text-muted); }
+        td { padding: .7rem .8rem; border-bottom-color: rgba(38,48,39,.65); }
+        tbody tr:hover { background: rgba(185,220,117,.055); }
+        .chart-wrapper { height: 300px; }
+        .empty-state { border: 1px dashed var(--border-highlight); border-radius: 3px; }
+        button { font-family: 'IBM Plex Mono', monospace; }
+        .action-btn, .view-all-btn { border-radius: 2px; text-transform: uppercase; letter-spacing: .08em; }
+        @media (max-width: 720px) {
+            #main-view { padding: 1rem; }
+            #header { padding: 0 1rem; }
+            .header-right .live-status { display: none; }
         }
     </style>
 </head>
@@ -2460,8 +2542,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         {
                             label: 'Regular Input',
                             data: inputSeries,
-                            borderColor: '#8b5cf6',
-                            backgroundColor: 'rgba(139, 92, 246, 0.01)',
+                            borderColor: '#b9dc75',
+                            backgroundColor: 'rgba(185, 220, 117, 0.01)',
                             fill: true,
                             tension: 0.3,
                             borderWidth: 2,
@@ -2480,8 +2562,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         {
                             label: 'Cache Reads',
                             data: cacheSeries,
-                            borderColor: '#10b981',
-                            backgroundColor: 'rgba(16, 185, 129, 0.01)',
+                            borderColor: '#b9dc75',
+                            backgroundColor: 'rgba(185, 220, 117, 0.01)',
                             fill: true,
                             tension: 0.3,
                             borderWidth: 2,
@@ -2497,8 +2579,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         tooltip: {
                             mode: 'index',
                             intersect: false,
-                            backgroundColor: '#0e121f',
-                            borderColor: '#1c2336',
+                        backgroundColor: '#111512',
+                        borderColor: '#263027',
                             borderWidth: 1,
                             callbacks: { label: function(context) { return ' ' + context.dataset.label + ': ' + formatNumber(context.raw); } }
                         }
@@ -2513,7 +2595,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             // Overview Doughnut Chart (Models)
             const modelsLabels = Object.keys(modelData);
             const modelsValues = Object.values(modelData);
-            const chartColors = ['#ff7a00', '#8b5cf6', '#06b6d4', '#10b981', '#1f6feb', '#f59e0b', '#ec4899', '#64748b'];
+            const chartColors = ['#ff7849', '#b9dc75', '#7ed7bd', '#e6a85c', '#ff5f56', '#d7c27d', '#c18f6b', '#687368'];
 
             if (charts.modelOverview) charts.modelOverview.destroy();
             const ctxModel = document.getElementById('modelChartOverview').getContext('2d');
@@ -3031,7 +3113,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     datasets: [{
                         label: 'Total Tokens',
                         data: tokens,
-                        backgroundColor: '#8b5cf6',
+                        backgroundColor: '#b9dc75',
                         borderRadius: 4
                     }]
                 },
@@ -3079,7 +3161,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     datasets: [{
                         label: 'Cache Hit %',
                         data: caches,
-                        backgroundColor: '#10b981',
+                        backgroundColor: '#b9dc75',
                         borderRadius: 4
                     }]
                 },
