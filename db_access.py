@@ -266,3 +266,29 @@ def fetch_tool_totals():
         print(f"Error running QUERY_TOOL_TOTALS: {e}", file=sys.stderr)
         if conn: conn.close()
         return {}
+
+def fetch_balance_observations():
+    conn = get_db_connection(DB_PATH)
+    if not conn:
+        return {}
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT provider_id, account_id, metric_key, used, observed_at
+            FROM balance_observations
+            ORDER BY observed_at DESC
+        """)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+        latest_metrics = {}
+        for r in rows:
+            key = r['metric_key']
+            if key not in latest_metrics:
+                latest_metrics[key] = r['used']
+
+        return latest_metrics
+    except Exception as e:
+        print(f"Error reading balance_observations: {e}", file=sys.stderr)
+        if conn: conn.close()
+        return {}

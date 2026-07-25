@@ -297,10 +297,37 @@ def compute_analytics():
         total_tokens += cop_tot
         requests_count += cop_req
         agents.add('copilot')
-        
+
         cop_cost, cop_savings = utils.estimate_token_cost_and_savings('copilot', cop_in, cop_out, 0)
         total_cost += cop_cost
         total_savings += cop_savings
+
+    # Preserve the event-log scope before applying cumulative provider metrics.
+    # These are intentionally separate measures: event totals power the
+    # repository/session drilldowns, while provider totals represent all-time
+    # usage reported by the upstream daemon.
+    local_event_totals = {
+        "tokens": total_tokens,
+        "input": total_input,
+        "output": total_output,
+        "cache_read": total_cache_read,
+    }
+
+    # Incorporate authoritative balance observations from OpenUsage daemon poller
+    balance_obs = db_access.fetch_balance_observations()
+    if balance_obs:
+        obs_input = balance_obs.get('client_ide_input_tokens', 0) or balance_obs.get('provider_codex_input_tokens', 0)
+        obs_cached = balance_obs.get('client_ide_cached_tokens', 0)
+        obs_output = balance_obs.get('client_ide_output_tokens', 0) or balance_obs.get('provider_codex_output_tokens', 0)
+        obs_cost = balance_obs.get('all_time_api_cost', 0) or balance_obs.get('total_cost_usd', 0)
+
+        if obs_input > 0:
+            total_input = max(total_input, int(obs_input))
+            total_cache_read = max(total_cache_read, int(obs_cached))
+            total_output = max(total_output, int(obs_output))
+            total_tokens = total_input + total_output + total_cache_read
+            if obs_cost > 0:
+                total_cost = max(total_cost, float(obs_cost))
 
     # Session breakdown calculations
     sessions_list = []
@@ -445,7 +472,7 @@ def compute_analytics():
     repositories_list.sort(key=lambda r: r["tokens"], reverse=True)
 
     # Model analytics calculations
-    models_list = []
+    models_dict = {}
     for model_name, m_events in events_by_model.items():
         m_inp = sum(e['input_tokens'] for e in m_events)
         m_out = sum(e['output_tokens'] for e in m_events)
@@ -471,9 +498,12 @@ def compute_analytics():
             m_cost += c_val
             m_savings += s_val
             
-        model_obj = {
+        models_dict[model_name] = {
             "model_name": model_name,
             "total_tokens": m_tot,
+            "input_tokens": m_inp,
+            "output_tokens": m_out,
+            "cache_read_tokens": m_cread,
             "requests": m_reqs,
             "average_context": int(m_inp / m_reqs) if m_reqs > 0 else 0,
             "average_completion": int(m_out / m_reqs) if m_reqs > 0 else 0,
@@ -485,8 +515,65 @@ def compute_analytics():
             "estimated_savings": m_savings,
             "latency": "N/A"
         }
-        models_list.append(model_obj)
-        
+
+    # Reconcile model metrics from balance_obs if present
+    if balance_obs:
+        # Extract model-specific observation keys
+        # Pattern: model_<sanitized_name>_input_tokens, etc.
+        model_obs_data = collections.defaultdict(dict)
+        for k, val in balance_obs.items():
+            if k.startswith('model_') and ('_tokens' in k or '_cost_usd' in k):
+                # e.g., model_gpt_5_3_codex_input_tokens -> model: gpt_5_3_codex, metric: input_tokens
+                parts = k.split('_')
+                # find metric suffix
+                if k.endswith('_input_tokens'):
+                    m_name = '_'.join(parts[1:-2])
+                    model_obs_data[m_name]['input'] = val
+                elif k.endswith('_output_tokens'):
+                    m_name = '_'.join(parts[1:-2])
+                    model_obs_data[m_name]['output'] = val
+                elif k.endswith('_cached_tokens'):
+                    m_name = '_'.join(parts[1:-2])
+                    model_obs_data[m_name]['cached'] = val
+                elif k.endswith('_total_tokens'):
+                    m_name = '_'.join(parts[1:-2])
+                    model_obs_data[m_name]['total'] = val
+                elif k.endswith('_cost_usd'):
+                    m_name = '_'.join(parts[1:-2])
+                    model_obs_data[m_name]['cost'] = val
+
+        for raw_m_key, m_obs in model_obs_data.items():
+            # Format display model name: gpt_5_3_codex -> gpt-5.3-codex
+            canonical_m_name = raw_m_key.replace('_', '-').replace('-codex', '-codex')
+            # find matching key in models_dict
+            match_key = next((k for k in models_dict if k.replace('_', '-').replace('.', '-') == canonical_m_name.replace('.', '-')), None)
+            target_key = match_key or canonical_m_name
+
+            if target_key not in models_dict:
+                models_dict[target_key] = {
+                    "model_name": target_key,
+                    "total_tokens": 0, "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
+                    "requests": 1, "average_context": 0, "average_completion": 0, "average_cache_hit": 0,
+                    "repositories_used": [], "sessions": 0, "usage_over_time": [],
+                    "estimated_cost": 0.0, "estimated_savings": 0.0, "latency": "N/A"
+                }
+
+            m_obj = models_dict[target_key]
+            m_inp = int(m_obs.get('input', m_obj['input_tokens']))
+            m_out = int(m_obs.get('output', m_obj['output_tokens']))
+            m_cread = int(m_obs.get('cached', m_obj['cache_read_tokens']))
+            m_tot = int(m_obs.get('total', m_inp + m_out + m_cread))
+            m_cost = float(m_obs.get('cost', m_obj['estimated_cost']))
+
+            m_obj['input_tokens'] = max(m_obj['input_tokens'], m_inp)
+            m_obj['output_tokens'] = max(m_obj['output_tokens'], m_out)
+            m_obj['cache_read_tokens'] = max(m_obj['cache_read_tokens'], m_cread)
+            m_obj['total_tokens'] = max(m_obj['total_tokens'], m_tot)
+            m_obj['estimated_cost'] = max(m_obj['estimated_cost'], m_cost)
+            if (m_obj['input_tokens'] + m_obj['cache_read_tokens']) > 0:
+                m_obj['average_cache_hit'] = m_obj['cache_read_tokens'] / (m_obj['input_tokens'] + m_obj['cache_read_tokens'])
+
+    models_list = list(models_dict.values())
     models_list.sort(key=lambda m: m["total_tokens"], reverse=True)
 
     # Tool analytics calculations
@@ -613,8 +700,8 @@ def compute_analytics():
             "requests_count": requests_count,
             "sessions_count": len(sessions_list),
             "active_repositories_count": len(workspaces),
-            "active_models_count": len(models),
-            "active_tools_count": len(agents),
+            "active_models_count": len(models_list),
+            "active_tools_count": len(tools_list),
             "avg_context_size": int(total_input / requests_count) if requests_count > 0 else 0,
             "avg_tokens_per_request": int(total_tokens / requests_count) if requests_count > 0 else 0,
             "largest_request": largest_request,
@@ -629,7 +716,16 @@ def compute_analytics():
             "peak_usage_day": peak_usage_day,
             "peak_usage_tokens": peak_usage_tokens,
             "estimated_cost": total_cost,
-            "estimated_savings": total_savings
+            "estimated_savings": total_savings,
+            "local_event_tokens": local_event_totals["tokens"],
+            "local_event_input": local_event_totals["input"],
+            "local_event_output": local_event_totals["output"],
+            "local_event_cached_tokens": local_event_totals["cache_read"],
+            "provider_reported_tokens": total_tokens,
+            "provider_reported_input": total_input,
+            "provider_reported_output": total_output,
+            "provider_reported_cached_tokens": total_cache_read,
+            "coverage_gap_tokens": max(0, total_tokens - local_event_totals["tokens"]),
         },
         "repositories": repositories_list,
         "sessions": sessions_list,

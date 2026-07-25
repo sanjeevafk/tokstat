@@ -1089,10 +1089,23 @@ def generate_html_report(report_data, output_path, watch_mode=False):
         .empty-state { border: 1px dashed var(--border-highlight); border-radius: 3px; }
         button { font-family: 'IBM Plex Mono', monospace; }
         .action-btn, .view-all-btn { border-radius: 2px; text-transform: uppercase; letter-spacing: .08em; }
+        .data-scope-banner { display: grid; grid-template-columns: auto minmax(240px, 1fr) repeat(3, auto); align-items: center; gap: 1rem; background: #151b14; border: 1px solid #45553f; border-left: 3px solid var(--accent-orange); border-radius: 3px; padding: .8rem 1rem; }
+        .scope-mark { color: var(--accent-orange); font-size: .62rem; font-weight: 700; letter-spacing: .12em; writing-mode: vertical-rl; transform: rotate(180deg); }
+        .scope-copy { display: flex; flex-direction: column; gap: .2rem; }
+        .scope-copy strong { font-family: 'Syne', sans-serif; font-size: .9rem; }
+        .scope-copy span { color: var(--text-secondary); font-size: .64rem; line-height: 1.5; }
+        .scope-stat { border-left: 1px solid #45553f; padding-left: 1rem; display: flex; flex-direction: column; gap: .25rem; min-width: 105px; }
+        .scope-stat small { color: var(--text-muted); font-size: .56rem; letter-spacing: .08em; }
+        .scope-stat b { color: var(--accent-emerald); font-family: 'Syne', sans-serif; font-size: 1rem; }
+        .scope-gap b { color: var(--accent-orange); }
         @media (max-width: 720px) {
             #main-view { padding: 1rem; }
             #header { padding: 0 1rem; }
             .header-right .live-status { display: none; }
+            .data-scope-banner { grid-template-columns: 1fr 1fr; }
+            .scope-mark { writing-mode: initial; transform: none; grid-column: 1 / -1; }
+            .scope-copy { grid-column: 1 / -1; }
+            .scope-stat { border-left: 0; padding-left: 0; }
         }
     </style>
 </head>
@@ -1257,6 +1270,16 @@ def generate_html_report(report_data, output_path, watch_mode=False):
 
             <!-- ================= VIEW: OVERVIEW ================= -->
             <div id="view-overview" class="tab-view active">
+                <div class="data-scope-banner">
+                    <div class="scope-mark">DATA SCOPE</div>
+                    <div class="scope-copy">
+                        <strong>Two lenses, one telemetry picture</strong>
+                        <span>Provider totals are cumulative; detailed tables use locally observed request events.</span>
+                    </div>
+                    <div class="scope-stat"><small>PROVIDER REPORTED</small><b>__SCOPE_PROVIDER__</b></div>
+                    <div class="scope-stat"><small>LOCAL EVENT LOG</small><b>__SCOPE_EVENTS__</b></div>
+                    <div class="scope-stat scope-gap"><small>NOT IN EVENT LOG</small><b>__SCOPE_GAP__</b></div>
+                </div>
                 <div class="metrics-grid">
                     <!-- Stat cards -->
                     <div class="metric-card card-glow-orange">
@@ -1415,7 +1438,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         <div class="panel-header">
                             <div>
                                 <h2 class="panel-title">Repository Telemetry Analytics</h2>
-                                <p class="panel-subtitle">Detailed breakdown of LLM usage per workspace folder</p>
+                                <p class="panel-subtitle">Locally observed request events grouped by workspace folder</p>
                             </div>
                         </div>
                         <div class="table-wrapper">
@@ -1543,7 +1566,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         <div class="panel-header">
                             <div>
                                 <h2 class="panel-title">Session Explorer</h2>
-                                <p class="panel-subtitle">Detailed log of coding sessions, costs, and request pipelines</p>
+                                <p class="panel-subtitle">Locally observed request events grouped into sessions</p>
                             </div>
                         </div>
                         <div class="table-wrapper">
@@ -1637,7 +1660,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <div class="panel-header">
                         <div>
                             <h2 class="panel-title">Model Performance & Usage Comparison</h2>
-                            <p class="panel-subtitle">Visual analysis of token counts, cache efficiencies, and API costs by model</p>
+                            <p class="panel-subtitle">Model analytics from the locally observed event log</p>
                         </div>
                     </div>
                     <div class="three-col-grid">
@@ -1686,7 +1709,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <div class="panel-header">
                         <div>
                             <h2 class="panel-title">Coding Tool & Agent Telemetry</h2>
-                            <p class="panel-subtitle">Automatically discovered developer tools and execution metrics</p>
+                            <p class="panel-subtitle">Tool analytics from the locally observed event log</p>
                         </div>
                     </div>
                     
@@ -2424,6 +2447,19 @@ def generate_html_report(report_data, output_path, watch_mode=False):
 
             const cacheHitPct = (totalInput + cachedTokens) > 0 ? (cachedTokens / (totalInput + cachedTokens) * 100) : 0;
             
+            // If default 'all' filters are active, use authoritative global_overview totals
+            const isAllDefault = activeFilters.project === 'all' && activeFilters.model === 'all' && activeFilters.tool === 'all' && activeFilters.timeframe === 'all';
+            if (isAllDefault && TELEMETRY_DATA.global_overview) {
+                const go = TELEMETRY_DATA.global_overview;
+                if (go.total_tokens > totalTokens) {
+                    totalTokens = go.total_tokens;
+                    totalInput = go.total_input;
+                    totalOutput = go.total_output;
+                    cachedTokens = go.cached_tokens;
+                    cost = go.estimated_cost;
+                }
+            }
+
             // Set stats elements
             document.getElementById('stat-total-tokens').innerText = formatNumber(totalTokens);
             document.getElementById('stat-input-tokens').innerText = formatNumber(totalInput);
@@ -2433,6 +2469,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             document.getElementById('stat-cost').innerText = '$' + cost.toFixed(2);
             document.getElementById('stat-savings').innerText = '$' + savings.toFixed(2);
             document.getElementById('stat-io-ratio').innerText = totalInput > 0 ? (totalOutput / totalInput).toFixed(3) : '0.0';
+
             
             document.getElementById('stat-sessions').innerText = uniqueSessions.size;
             document.getElementById('stat-requests').innerText = filteredEvents.length;
@@ -3535,6 +3572,10 @@ def generate_html_report(report_data, output_path, watch_mode=False):
         ).replace(
             f'id="{element_id}">$0.00</', f'id="{element_id}">{value}</'
         )
+
+    html_content = html_content.replace("__SCOPE_PROVIDER__", compact_number(overview.get("provider_reported_tokens", overview.get("total_tokens", 0))))
+    html_content = html_content.replace("__SCOPE_EVENTS__", compact_number(overview.get("local_event_tokens", 0)))
+    html_content = html_content.replace("__SCOPE_GAP__", compact_number(overview.get("coverage_gap_tokens", 0)))
     
     with open(output_path, "w", encoding='utf-8') as f:
         f.write(html_content)
