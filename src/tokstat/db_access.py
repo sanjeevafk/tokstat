@@ -188,6 +188,7 @@ def fetch_all_events():
         
         if fingerprint not in ou_fingerprints:
             merged_events.append(ev)
+            ou_fingerprints.add(fingerprint)
 
     merged_events.sort(key=lambda x: x.get('occurred_at') or '')
     return merged_events
