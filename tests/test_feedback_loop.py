@@ -1,7 +1,8 @@
 # test_feedback_loop.py
 import unittest
-import analytics
-import db_access
+
+from tokstat import analytics
+
 
 class TestTokenTotals(unittest.TestCase):
     def test_analytics_total_tokens(self):
