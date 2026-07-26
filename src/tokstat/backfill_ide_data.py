@@ -1,10 +1,10 @@
-import os
-import sqlite3
-import json
-import uuid
-import re
 import datetime
+import json
+import os
 import random
+import re
+import sqlite3
+import uuid
 
 # Paths
 DB_PATH = os.path.expanduser("~/.local/state/openusage/telemetry.db")

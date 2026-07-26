@@ -2,6 +2,7 @@
 import os
 import subprocess
 
+
 def find_git_repo_path(workspace_id):
     """
     Given a workspace_id (which could be a project name or path),

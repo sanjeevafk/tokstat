@@ -1,6 +1,6 @@
 # renderer.py
 import json
-import os
+
 
 def generate_html_report(report_data, output_path, watch_mode=False):
     """

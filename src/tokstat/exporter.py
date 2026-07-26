@@ -3,7 +3,9 @@ import csv
 import json
 import os
 from datetime import datetime
+
 import fpdf
+
 
 def clean_txt(text):
     """
@@ -140,7 +142,6 @@ def export_markdown(report_data, path):
 def export_pdf(report_data, path):
     try:
         go = report_data["global_overview"]
-        prod = report_data["productivity_metrics"]
         
         pdf = TokenTrackerPDF()
         pdf.alias_nb_pages()

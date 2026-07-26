@@ -1,10 +1,10 @@
 # analytics.py
-from datetime import datetime, timedelta
 import collections
 import re
-import os
-import db_access
-import utils
+from datetime import datetime, timedelta
+
+from . import db_access, utils
+
 
 def parse_datetime(dt_str):
     if not dt_str:
@@ -53,15 +53,13 @@ def compute_uninterrupted_sessions(events, gap_minutes=30):
             current_end = t
         else:
             duration = current_end - current_start
-            if duration > longest_duration:
-                longest_duration = duration
+            longest_duration = max(longest_duration, duration)
             current_start = t
             current_end = t
             
     # check last one
     duration = current_end - current_start
-    if duration > longest_duration:
-        longest_duration = duration
+    longest_duration = max(longest_duration, duration)
         
     return int(longest_duration.total_seconds())
 

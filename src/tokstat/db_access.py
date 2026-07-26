@@ -1,15 +1,16 @@
 # db_access.py
-import sqlite3
-import os
-import sys
-import re
 import datetime
-from queries import (
+import os
+import re
+import sqlite3
+import sys
+
+from .queries import (
     QUERY_ALL_EVENTS,
     QUERY_DAILY_ROLLUP,
     QUERY_PROJECTS_BREAKDOWN,
     QUERY_SESSIONS_BREAKDOWN,
-    QUERY_TOOL_TOTALS
+    QUERY_TOOL_TOTALS,
 )
 
 DB_PATH = os.path.expanduser("~/.local/state/openusage/telemetry.db")

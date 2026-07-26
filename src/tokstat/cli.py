@@ -1,19 +1,16 @@
 # visualize_usage.py
-import os
-import sys
-import time
 import argparse
-import threading
 import http.server
-import socketserver
 import json
+import os
+import socketserver
+import sys
+import threading
+import time
 from datetime import datetime
 
 # Import refactored modules
-import db_access
-import analytics
-import renderer
-import exporter
+from . import analytics, exporter, renderer
 
 # Default Paths
 DB_PATH = os.path.expanduser("~/.local/state/openusage/telemetry.db")
