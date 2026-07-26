@@ -3,11 +3,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
-TokStat is a local, modular telemetry dashboard and analytics utility for monitoring AI developer token usage across different developer environments, models, and tools. It integrates inputs from OpenUsage database records, tokentop databases, and GitHub Copilot to build a unified view of your developer token economy.
+TokStat is a local, modular telemetry dashboard and analytics utility for monitoring AI developer token usage across different developer environments, models, and tools. It integrates inputs from [OpenUsage](https://github.com/janekbaraniewski/openusage) database records, [tokentop](https://github.com/tokentopapp/tokentop) databases, and GitHub Copilot to build a unified view of your developer token economy.
+
+## Dashboard Preview
+
+![TokStat Dashboard Preview](docs/assets/dashboard_preview.png)
 
 ## Features
 
-- **Unified Telemetry Merger:** Automatically merges and de-duplicates telemetry events from OpenUsage and tokentop database streams using time-window fingerprint comparison.
+- **Unified Telemetry Merger:** Automatically merges and de-duplicates telemetry events from [OpenUsage](https://github.com/janekbaraniewski/openusage) and [tokentop](https://github.com/tokentopapp/tokentop) database streams using time-window fingerprint comparison.
 - **Interactive Web Dashboard:** Generates a self-contained HTML visualizer containing detailed analytics for model distribution, token consumption trends, and tool usage.
 - **Git Integration:** Correlates local repository commit logs with token usage windows to calculate the token cost and context utilization of individual commits.
 - **Real-Time Watcher:** Includes an active polling server mode that watches local telemetry databases for modifications and updates the browser view dynamically.
@@ -96,6 +100,13 @@ tokstat/
 ├── LICENSE                # MIT License
 └── README.md
 ```
+
+## Acknowledgments
+
+TokStat builds upon and integrates data from the following excellent open-source projects:
+
+- [OpenUsage](https://github.com/janekbaraniewski/openusage) - CLI & local-first telemetry tracking for AI coding tools.
+- [tokentop](https://github.com/tokentopapp/tokentop) - Real-time terminal monitoring for AI token usage and LLM costs.
 
 ## License
 
