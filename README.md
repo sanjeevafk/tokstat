@@ -7,7 +7,8 @@ TokStat is a local, modular telemetry dashboard and analytics utility for monito
 
 ## Dashboard Preview
 
-![TokStat Dashboard Preview](docs/assets/dashboard_preview.png)
+![TokStat Overview Dashboard](docs/assets/dashboard_overview.png)
+![TokStat Time & Heatmaps](docs/assets/dashboard_heatmaps.png)
 
 ## Features
 
