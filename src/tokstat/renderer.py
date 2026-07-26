@@ -3641,30 +3641,34 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             const fallback = document.getElementById('git-disabled-fallback');
             const wrapper = document.getElementById('git-correlation-table-wrapper');
 
-            if (commits.length === 0) {
+            if (allCommits.length === 0) {
                 wrapper.style.display = 'none';
                 fallback.style.display = 'flex';
             } else {
                 wrapper.style.display = 'block';
                 fallback.style.display = 'none';
 
-                commits.forEach(c => {
-                    const tr = document.createElement('tr');
-                    tr.className = 'clickable-row';
-                    tr.onclick = () => drilldownRepo(c.project);
-                    tr.innerHTML = `
-                        <td><span style="font-weight:700;">${c.project}</span></td>
-                        <td><span class="pill pill-purple">${c.hash}</span></td>
-                        <td><span class="pill">${c.branch}</span></td>
-                        <td style="white-space:nowrap; font-size:0.75rem; color:var(--text-secondary);">${c.datetime}</td>
-                        <td style="font-weight:500; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.message}</td>
-                        <td style="text-align:right;">${c.requests}</td>
-                        <td style="text-align:right; font-family:monospace; font-weight:600;" class="text-orange">${formatNumber(c.tokens)}</td>
-                        <td style="text-align:right; font-size:0.8rem; font-weight:600; color:var(--accent-cyan);">${formatDuration(c.coding_time)}</td>
-                        <td style="text-align:right; font-family:monospace; color:var(--text-secondary);">$${c.cost.toFixed(3)}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
+                if (commits.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--text-muted);">No commits match active filters.</td></tr>';
+                } else {
+                    commits.forEach(c => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'clickable-row';
+                        tr.onclick = () => drilldownRepo(c.project);
+                        tr.innerHTML = `
+                            <td><span style="font-weight:700;">${c.project}</span></td>
+                            <td><span class="pill pill-purple">${c.hash}</span></td>
+                            <td><span class="pill">${c.branch}</span></td>
+                            <td style="white-space:nowrap; font-size:0.75rem; color:var(--text-secondary);">${c.datetime}</td>
+                            <td style="font-weight:500; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.message}</td>
+                            <td style="text-align:right;">${c.requests}</td>
+                            <td style="text-align:right; font-family:monospace; font-weight:600;" class="text-orange">${formatNumber(c.tokens)}</td>
+                            <td style="text-align:right; font-size:0.8rem; font-weight:600; color:var(--accent-cyan);">${formatDuration(c.coding_time)}</td>
+                            <td style="text-align:right; font-family:monospace; color:var(--text-secondary);">$${c.cost.toFixed(3)}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
             }
         }
 
