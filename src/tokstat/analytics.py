@@ -211,33 +211,53 @@ def compute_analytics():
     largest_request = None
     
     for ev in events:
-        occurred = ev.get('occurred_at')
+        occurred = ev.get('occurred_at') or ''
         dt = parse_datetime(occurred)
         
         inp = ev.get('input_tokens') or 0
         out = ev.get('output_tokens') or 0
         cread = ev.get('cache_read_tokens') or 0
-        tot = ev.get('total_tokens') or 0
+        tot = ev.get('total_tokens') or (inp + out + cread)
         reqs = ev.get('requests') or 1
         
+        ws = ev.get('workspace_id') or 'Global/No Project'
+        model = ev.get('model_raw') or 'System/Tools'
+        agent = ev.get('agent_name') or 'Unknown'
+        
+        cost, savings = utils.estimate_token_cost_and_savings(model, inp, out, cread)
+        
+        norm_ev = {
+            "event_id": ev.get("event_id"),
+            "occurred_at": occurred,
+            "workspace_id": ws,
+            "session_id": ev.get("session_id"),
+            "turn_id": ev.get("turn_id"),
+            "model_raw": model,
+            "agent_name": agent,
+            "input_tokens": inp,
+            "output_tokens": out,
+            "cache_read_tokens": cread,
+            "total_tokens": tot,
+            "requests": reqs,
+            "status": ev.get("status", "ok")
+        }
+
         total_input += inp
         total_output += out
         total_cache_read += cread
         total_tokens += tot
         requests_count += reqs
-        
-        cost, savings = utils.estimate_token_cost_and_savings(ev['model_raw'], inp, out, cread)
         total_cost += cost
         total_savings += savings
         
         # Track largest request
         if not largest_request or tot > largest_request['total_tokens']:
             largest_request = {
-                "event_id": ev["event_id"],
+                "event_id": norm_ev["event_id"],
                 "occurred_at": occurred,
-                "project": ev["workspace_id"] or "Global/No Project",
-                "model": ev["model_raw"] or "Unknown",
-                "tool": ev["agent_name"] or "Unknown",
+                "project": ws,
+                "model": model,
+                "tool": agent,
                 "input_tokens": inp,
                 "output_tokens": out,
                 "cache_read_tokens": cread,
@@ -245,22 +265,17 @@ def compute_analytics():
                 "cost": cost
             }
 
-        # Track workspace/repo, model, agent
-        ws = ev['workspace_id'] or 'Global/No Project'
-        model = ev['model_raw'] or 'System/Tools'
-        agent = ev['agent_name'] or 'Unknown'
-        
         if ws != 'Global/No Project':
             workspaces.add(ws)
         models.add(model)
         agents.add(agent)
         
         # Groupings
-        events_by_project[ws].append(ev)
-        if ev['session_id']:
-            events_by_session[ev['session_id']].append(ev)
-        events_by_model[model].append(ev)
-        events_by_tool[agent].append(ev)
+        events_by_project[ws].append(norm_ev)
+        if norm_ev['session_id']:
+            events_by_session[norm_ev['session_id']].append(norm_ev)
+        events_by_model[model].append(norm_ev)
+        events_by_tool[agent].append(norm_ev)
         
         # Time processing
         if dt:
