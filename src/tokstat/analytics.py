@@ -352,7 +352,7 @@ def compute_analytics():
         if sess_id == "Global/No Session" or not sess_id:
             continue
             
-        times = [parse_datetime(e['occurred_at']) for e in s_events if parse_datetime(e['occurred_at'])]
+        times = [dt for e in s_events if (dt := parse_datetime(e['occurred_at'])) is not None]
         if not times:
             continue
         start_time = min(times)
@@ -434,7 +434,7 @@ def compute_analytics():
         p_sessions = len(set(e['session_id'] for e in p_events if e['session_id']))
         
         # Latest activity
-        p_times = [parse_datetime(e['occurred_at']) for e in p_events if parse_datetime(e['occurred_at'])]
+        p_times = [dt for e in p_events if (dt := parse_datetime(e['occurred_at'])) is not None]
         latest_act = max(p_times).strftime("%Y-%m-%d %H:%M:%S") if p_times else "N/A"
         
         # Longest session in this repo
@@ -630,7 +630,7 @@ def compute_analytics():
             "total_tokens": t_tot,
             "input_tokens": t_inp,
             "output_tokens": t_out,
-            "cache_read_tokens": cread,
+            "cache_read_tokens": t_cread,
             "cache_ratio": t_cread / (t_inp + t_cread) if (t_inp + t_cread) > 0 else 0,
             "requests": t_reqs,
             "repositories": t_repos,
