@@ -3422,15 +3422,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 grid.innerHTML += `
                     <div class="metric-card card-glow-orange">
                         <div class="metric-header">
-                            <span style="font-weight:700; color:var(--text-primary); font-size:0.85rem;">${t.display_name}</span>
-                            <span class="pill pill-cyan">${t.tool_name}</span>
-                        </div>
-                        <div style="margin:0.5rem 0;">
-                            <div class="metric-value" style="font-size:1.8rem;">${formatNumber(t.total_tokens)}</div>
-                            <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.2rem;">Total Tokens Consumed</div>
-                        </div>
-                        <div class="metric-footer" style="margin-top:0.8rem; border-top:1px solid rgba(255,255,255,0.03); padding-top:0.6rem;">
-                            <span>${t.requests} requests</span>
+            toolsArr.forEach(t => {
+                const cachePct = t.cache_ratio * 100;
                             <span class="text-emerald" style="font-weight:600;">${cachePct.toFixed(1)}% cached</span>
                         </div>
                     </div>
@@ -3600,12 +3593,12 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             document.getElementById('prod-busiest-day').innerText = TELEMETRY_DATA.time_analytics.busiest_coding_day;
             
             // Find busiest hour
-            const hourlyMap = TELEMETRY_DATA.time_analytics.hourly_heatmap;
+            const targetHourlyMap = Object.keys(hourlyMap).length > 0 ? hourlyMap : (TELEMETRY_DATA.time_analytics ? TELEMETRY_DATA.time_analytics.hourly_heatmap : {});
             let busiestHour = 0;
             let busiestHourTokens = 0;
-            Object.keys(hourlyMap).forEach(h => {
-                if (hourlyMap[h] > busiestHourTokens) {
-                    busiestHourTokens = hourlyMap[h];
+            Object.keys(targetHourlyMap).forEach(h => {
+                if (targetHourlyMap[h] > busiestHourTokens) {
+                    busiestHourTokens = targetHourlyMap[h];
                     busiestHour = h;
                 }
             });
