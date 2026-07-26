@@ -2347,28 +2347,33 @@ def generate_html_report(report_data, output_path, watch_mode=False):
         function getFilteredRawEvents() {
             // Note: Since all telemetry is loaded in client memory, we filter events
             // matching the active sidebar project, model, tool and timeframe filters.
-            
-            // Search query filter
-            const searchVal = document.getElementById('global-search-input').value.toLowerCase().trim();
+            const searchVal = document.getElementById('global-search-input') ? document.getElementById('global-search-input').value.toLowerCase().trim() : '';
             
             const sourceEvents = TELEMETRY_DATA.events || TELEMETRY_DATA.sessions.flatMap(s => s.timeline.map(turn => ({
                 ...turn, project: s.project, session_id: s.session_id,
-                tool: turn.tool || 'Unknown'
+                tool: turn.tool || turn.tool_name || 'Unknown'
             })));
             return sourceEvents.filter(ev => {
+                const proj = ev.project || ev.repository || '';
+                const mdl = ev.model || ev.model_name || '';
+                const tool = ev.tool || ev.tool_name || 'Unknown';
+
                 // Project filter
-                if (activeFilters.project !== 'all' && ev.project !== activeFilters.project) return false;
+                if (activeFilters.project !== 'all' && proj !== activeFilters.project) return false;
                 // Model filter
-                if (activeFilters.model !== 'all' && ev.model !== activeFilters.model) return false;
+                if (activeFilters.model !== 'all' && mdl !== activeFilters.model) return false;
+                // Tool filter
+                if (activeFilters.tool !== 'all' && tool !== activeFilters.tool) return false;
                 // Timeframe filter
                 if (!matchesTimeframe(ev.occurred_at)) return false;
                 
                 // Search term
                 if (searchVal) {
                     const matchesSearch = 
-                        ev.project.toLowerCase().includes(searchVal) ||
-                        ev.session_id.toLowerCase().includes(searchVal) ||
-                        ev.model.toLowerCase().includes(searchVal) ||
+                        (proj && proj.toLowerCase().includes(searchVal)) ||
+                        (ev.session_id && ev.session_id.toLowerCase().includes(searchVal)) ||
+                        (mdl && mdl.toLowerCase().includes(searchVal)) ||
+                        (tool && tool.toLowerCase().includes(searchVal)) ||
                         (ev.occurred_at && ev.occurred_at.includes(searchVal));
                     if (!matchesSearch) return false;
                 }
@@ -3171,7 +3176,57 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             const tbody = document.getElementById('models-table-body');
             tbody.innerHTML = '';
 
-            const mData = TELEMETRY_DATA.models;
+            const filteredEvents = getFilteredRawEvents();
+            const modelAgg = {};
+
+            filteredEvents.forEach(ev => {
+                const mdl = ev.model || ev.model_name || 'Unknown';
+                if (!modelAgg[mdl]) {
+                    modelAgg[mdl] = {
+                        model_name: mdl,
+                        total_tokens: 0,
+                        input: 0,
+                        output: 0,
+                        cache_read: 0,
+                        requests: 0,
+                        repositories_used: new Set(),
+                        estimated_cost: 0.0,
+                        estimated_savings: 0.0
+                    };
+                }
+                const m = modelAgg[mdl];
+                m.total_tokens += ev.total;
+                m.input += ev.input;
+                m.output += ev.output;
+                m.cache_read += ev.cache_read;
+                m.requests += 1;
+                if (ev.project) m.repositories_used.add(ev.project);
+                m.estimated_cost += ev.cost;
+                m.estimated_savings += (ev.cache_read * 0.000003);
+            });
+
+            const mData = Object.keys(modelAgg).map(k => {
+                const m = modelAgg[k];
+                const avgContext = m.requests > 0 ? Math.round(m.input / m.requests) : 0;
+                const avgComp = m.requests > 0 ? Math.round(m.output / m.requests) : 0;
+                const cacheRatio = (m.input + m.cache_read) > 0 ? (m.cache_read / (m.input + m.cache_read)) : 0;
+                return {
+                    model_name: k,
+                    total_tokens: m.total_tokens,
+                    requests: m.requests,
+                    average_context: avgContext,
+                    average_completion: avgComp,
+                    average_cache_hit: cacheRatio,
+                    estimated_cost: m.estimated_cost,
+                    estimated_savings: m.estimated_savings,
+                    repositories_used: Array.from(m.repositories_used)
+                };
+            }).sort((a, b) => b.total_tokens - a.total_tokens);
+
+            if (mData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 3rem; color: var(--text-muted);">No models match active filters.</td></tr>';
+            }
+
             mData.forEach(m => {
                 const cacheRatio = m.average_cache_hit * 100;
                 const reposStr = m.repositories_used.join(', ') || 'N/A';
@@ -3306,12 +3361,63 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             const grid = document.getElementById('tools-grid-cards');
             grid.innerHTML = '';
             
-            const toolsArr = TELEMETRY_DATA.tools;
+            const filteredEvents = getFilteredRawEvents();
+            const toolAgg = {};
+
+            filteredEvents.forEach(ev => {
+                const toolName = ev.tool || ev.tool_name || 'Unknown';
+                if (!toolAgg[toolName]) {
+                    const staticTool = TELEMETRY_DATA.tools.find(t => t.tool_name === toolName) || {};
+                    toolAgg[toolName] = {
+                        tool_name: toolName,
+                        display_name: staticTool.display_name || toolName,
+                        total_tokens: 0,
+                        input: 0,
+                        output: 0,
+                        cache_read: 0,
+                        requests: 0,
+                        repositories: new Set(),
+                        models: new Set(),
+                        sessions: new Set(),
+                        times: []
+                    };
+                }
+                const t = toolAgg[toolName];
+                t.total_tokens += ev.total;
+                t.input += ev.input;
+                t.output += ev.output;
+                t.cache_read += ev.cache_read;
+                t.requests += 1;
+                if (ev.project) t.repositories.add(ev.project);
+                if (ev.model) t.models.add(ev.model);
+                if (ev.session_id) t.sessions.add(ev.session_id);
+                if (ev.occurred_at) t.times.push(new Date(ev.occurred_at));
+            });
+
+            const toolsArr = Object.keys(toolAgg).map(k => {
+                const t = toolAgg[k];
+                const cacheRatio = (t.input + t.cache_read) > 0 ? (t.cache_read / (t.input + t.cache_read)) : 0;
+                const times = t.times;
+                const duration = times.length > 0 ? (Math.max(...times) - Math.min(...times)) / 1000 : 0;
+                const avgSessLen = t.sessions.size > 0 ? Math.round(duration / t.sessions.size) : 0;
+                return {
+                    tool_name: t.tool_name,
+                    display_name: t.display_name,
+                    total_tokens: t.total_tokens,
+                    requests: t.requests,
+                    cache_ratio: cacheRatio,
+                    repositories: Array.from(t.repositories),
+                    models: Array.from(t.models),
+                    avg_session_length: avgSessLen
+                };
+            }).sort((a,b) => b.total_tokens - a.total_tokens);
+
+            if (toolsArr.length === 0) {
+                grid.innerHTML = '<div style="color: var(--text-muted); padding: 2rem;">No tools match active filters.</div>';
+            }
 
             toolsArr.forEach(t => {
                 const cachePct = t.cache_ratio * 100;
-                const repoCount = t.repositories.length;
-                const modelCount = t.models.length;
                 
                 grid.innerHTML += `
                     <div class="metric-card card-glow-orange">
@@ -3359,11 +3465,35 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             const container = document.getElementById('daily-heatmap-grid');
             container.innerHTML = '';
             
-            // Build date mappings
+            const filteredEvents = getFilteredRawEvents();
+            
+            // Build date & hourly mappings dynamically from filteredEvents
             const dailyMap = {};
-            TELEMETRY_DATA.time_analytics.daily_timeline.forEach(d => {
-                dailyMap[d.day] = d.total;
+            const hourlyMap = {};
+            const weekdayHeatmap = Array.from({length: 7}, () => Array(24).fill(0));
+
+            filteredEvents.forEach(ev => {
+                if (!ev.occurred_at) return;
+                const day = ev.occurred_at.slice(0, 10);
+                dailyMap[day] = (dailyMap[day] || 0) + ev.total;
+                
+                const dt = new Date(ev.occurred_at);
+                if (!isNaN(dt.getTime())) {
+                    const hr = dt.getHours();
+                    hourlyMap[hr] = (hourlyMap[hr] || 0) + ev.total;
+                    
+                    const dayIdx = dt.getDay() === 0 ? 6 : dt.getDay() - 1;
+                    weekdayHeatmap[dayIdx][hr] += ev.total;
+                }
             });
+
+            // Fallback to static if filteredEvents empty and default filters active
+            const isAllDefault = activeFilters.project === 'all' && activeFilters.model === 'all' && activeFilters.tool === 'all' && activeFilters.timeframe === 'all';
+            if (isAllDefault && Object.keys(dailyMap).length === 0 && TELEMETRY_DATA.time_analytics && TELEMETRY_DATA.time_analytics.daily_timeline) {
+                TELEMETRY_DATA.time_analytics.daily_timeline.forEach(d => {
+                    dailyMap[d.day] = d.total;
+                });
+            }
 
             // We create cells for the last 365 days leading up to today (2026-07-25)
             const endDate = new Date("2026-07-25");
@@ -3388,9 +3518,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
 
             // Render columns (53 weeks)
             // Render rows (7 days: Sun-Sat)
-            // But we render in chronological calendar grids
             for (let i = 0; i < 7; i++) {
-                // Generate cells for row
                 for (let j = 0; j < 53; j++) {
                     const idx = j * 7 + i;
                     if (idx < datesArr.length) {
@@ -3398,7 +3526,6 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         const dateStr = cellDate.toISOString().slice(0, 10);
                         const tokens = dailyMap[dateStr] || 0;
                         
-                        // Color levels 0 to 4
                         let level = 0;
                         if (tokens > 0) {
                             const ratio = tokens / maxTokens;
@@ -3408,7 +3535,6 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                             else level = 4;
                         }
                         
-                        // Background colors matching GitHub style
                         const colors = ['#161b22', '#0e4429', '#006d32', '#26a641', '#39d353'];
                         
                         const cell = document.createElement('div');
@@ -3416,7 +3542,6 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         cell.style.backgroundColor = colors[level];
                         cell.title = `${dateStr}: ${formatNumber(tokens)} tokens`;
                         
-                        // Drill down when clicking cell
                         cell.onclick = () => {
                             activeFilters.timeframe = 'all';
                             document.getElementById('global-search-input').value = dateStr;
@@ -3433,9 +3558,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             weeklyBody.innerHTML = '';
             
             const daysNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-            const heatmapData = TELEMETRY_DATA.time_analytics.weekday_heatmap; // [day_of_week][hour]
+            const heatmapData = (Object.keys(dailyMap).length > 0) ? weekdayHeatmap : (TELEMETRY_DATA.time_analytics ? TELEMETRY_DATA.time_analytics.weekday_heatmap : weekdayHeatmap);
 
-            // Find max hourly value for scaling colors
             let maxHourly = 1;
             for (let d = 0; d < 7; d++) {
                 for (let h = 0; h < 24; h++) {
@@ -3447,13 +3571,11 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             for (let d = 0; d < 7; d++) {
                 const tr = document.createElement('tr');
                 
-                // Day cell
                 const tdDay = document.createElement('td');
                 tdDay.innerText = daysNames[d];
                 tdDay.style.fontWeight = '600';
                 tr.appendChild(tdDay);
                 
-                // Hour blocks (grouped by 2 hours to avoid overflowing layout)
                 for (let h = 0; h < 24; h += 2) {
                     const val1 = (heatmapData[d] && heatmapData[d][h]) || 0;
                     const val2 = (heatmapData[d] && heatmapData[d][h+1]) || 0;
@@ -3508,7 +3630,21 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             const tbody = document.getElementById('git-commits-table-body');
             tbody.innerHTML = '';
             
-            const commits = TELEMETRY_DATA.git_integration.correlated_commits;
+            const searchVal = document.getElementById('global-search-input') ? document.getElementById('global-search-input').value.toLowerCase().trim() : '';
+            const allCommits = TELEMETRY_DATA.git_integration ? (TELEMETRY_DATA.git_integration.correlated_commits || []) : [];
+
+            const commits = allCommits.filter(c => {
+                if (activeFilters.project !== 'all' && c.project !== activeFilters.project) return false;
+                if (!matchesTimeframe(c.datetime)) return false;
+                if (searchVal) {
+                    const match = (c.project && c.project.toLowerCase().includes(searchVal)) ||
+                                  (c.hash && c.hash.toLowerCase().includes(searchVal)) ||
+                                  (c.message && c.message.toLowerCase().includes(searchVal));
+                    if (!match) return false;
+                }
+                return true;
+            });
+
             const fallback = document.getElementById('git-disabled-fallback');
             const wrapper = document.getElementById('git-correlation-table-wrapper');
 
