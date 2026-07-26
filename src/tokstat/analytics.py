@@ -211,14 +211,14 @@ def compute_analytics():
     largest_request = None
     
     for ev in events:
-        occurred = ev['occurred_at']
+        occurred = ev.get('occurred_at')
         dt = parse_datetime(occurred)
         
-        inp = ev['input_tokens']
-        out = ev['output_tokens']
-        cread = ev['cache_read_tokens']
-        tot = ev['total_tokens']
-        reqs = ev['requests']
+        inp = ev.get('input_tokens') or 0
+        out = ev.get('output_tokens') or 0
+        cread = ev.get('cache_read_tokens') or 0
+        tot = ev.get('total_tokens') or 0
+        reqs = ev.get('requests') or 1
         
         total_input += inp
         total_output += out

@@ -114,6 +114,10 @@ def estimate_token_cost_and_savings(model_raw, input_tokens, output_tokens, cach
         in_rate = 2.0 / 1000000.0
         out_rate = 8.0 / 1000000.0
         
+    input_tokens = input_tokens or 0
+    output_tokens = output_tokens or 0
+    cache_read_tokens = cache_read_tokens or 0
+
     # Cost formula
     cost = (input_tokens * in_rate) + (output_tokens * out_rate) + (cache_read_tokens * in_rate * (1.0 - cache_discount))
     savings = cache_read_tokens * in_rate * cache_discount

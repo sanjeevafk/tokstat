@@ -91,6 +91,12 @@ def fetch_tokentop_events():
             occurred_at = dt_obj.strftime("%Y-%m-%dT%H:%M:%SZ")
             proj = os.path.basename(r['project_path']) if r['project_path'] else 'Global/No Project'
             
+            in_tok = r['input_tokens'] or 0
+            out_tok = r['output_tokens'] or 0
+            cache_tok = r['cache_read_tokens'] or 0
+            cost_u = r['cost_usd'] or 0.0
+            req_cnt = r['request_count'] or 1
+            
             rows.append({
                 "event_id": f"tokentop-{r['id']}",
                 "occurred_at": occurred_at,
@@ -103,13 +109,13 @@ def fetch_tokentop_events():
                 "model_raw": r['model'] or 'unknown',
                 "model_canonical": r['model'],
                 "model_lineage_id": None,
-                "input_tokens": r['input_tokens'],
-                "output_tokens": r['output_tokens'],
-                "cache_read_tokens": r['cache_read_tokens'],
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
+                "cache_read_tokens": cache_tok,
                 "cache_write_tokens": 0,
-                "total_tokens": r['input_tokens'] + r['output_tokens'],
-                "cost_usd": r['cost_usd'],
-                "requests": r['request_count'],
+                "total_tokens": in_tok + out_tok,
+                "cost_usd": cost_u,
+                "requests": req_cnt,
                 "status": "ok",
                 "dedup_key": f"tokentop-{r['id']}"
             })
@@ -149,7 +155,7 @@ def fetch_all_events():
     # Fingerprint: (timestamp_10s_bucket, model, input_tokens, output_tokens)
     ou_fingerprints = set()
     for ev in ou_events:
-        ts_str = ev['occurred_at']
+        ts_str = str(ev.get('occurred_at') or '')
         try:
             m = re.match(r'^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d)', ts_str)
             ts_bucket = m.group(1) + " " + m.group(2) if m else ts_str[:15]
@@ -158,15 +164,15 @@ def fetch_all_events():
         
         fingerprint = (
             ts_bucket,
-            str(ev['model_raw']).lower(),
-            ev['input_tokens'],
-            ev['output_tokens']
+            str(ev.get('model_raw') or '').lower(),
+            ev.get('input_tokens') or 0,
+            ev.get('output_tokens') or 0
         )
         ou_fingerprints.add(fingerprint)
 
     merged_events = list(ou_events)
     for ev in tt_events:
-        ts_str = ev['occurred_at']
+        ts_str = str(ev.get('occurred_at') or '')
         try:
             m = re.match(r'^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d)', ts_str)
             ts_bucket = m.group(1) + " " + m.group(2) if m else ts_str[:15]
@@ -175,15 +181,15 @@ def fetch_all_events():
 
         fingerprint = (
             ts_bucket,
-            str(ev['model_raw']).lower(),
-            ev['input_tokens'],
-            ev['output_tokens']
+            str(ev.get('model_raw') or '').lower(),
+            ev.get('input_tokens') or 0,
+            ev.get('output_tokens') or 0
         )
         
         if fingerprint not in ou_fingerprints:
             merged_events.append(ev)
 
-    merged_events.sort(key=lambda x: x['occurred_at'] or '')
+    merged_events.sort(key=lambda x: x.get('occurred_at') or '')
     return merged_events
 
 
