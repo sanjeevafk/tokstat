@@ -6,6 +6,8 @@ from datetime import datetime
 
 import fpdf
 
+from . import utils
+
 
 def clean_txt(text):
     """
@@ -120,7 +122,8 @@ def export_markdown(report_data, path):
         md.append("| --- | --- | --- | --- | --- | --- | --- |")
         for t in report_data["tools"]:
             repos_str = ", ".join(t["repositories"][:3]) + ("..." if len(t["repositories"]) > 3 else "")
-            models_str = ", ".join(t["models"][:2]) + ("..." if len(t["models"]) > 2 else "")
+            norm_models = [utils.normalize_model_display_name(m) for m in t["models"]]
+            models_str = ", ".join(norm_models[:2]) + ("..." if len(norm_models) > 2 else "")
             md.append(f"| {t['display_name']} | {format_tokens(t['total_tokens'])} | {t['requests']} | {t['cache_ratio']*100:.1f}% | {repos_str or 'N/A'} | {models_str or 'N/A'} | {t['avg_session_length']//60}m |")
         md.append("")
 
@@ -249,7 +252,7 @@ def export_pdf(report_data, path):
         
         pdf.set_font('Helvetica', '', 8)
         for t in report_data["tools"]:
-            primary_model = t["models"][0] if t["models"] else "Unknown"
+            primary_model = utils.normalize_model_display_name(t["models"][0]) if t["models"] else "Unknown"
             pdf.cell(60, 5, clean_txt(t["display_name"]), 1, 0, 'L')
             pdf.cell(30, 5, clean_txt(format_tokens(t["total_tokens"])), 1, 0, 'R')
             pdf.cell(25, 5, clean_txt(str(t["requests"])), 1, 0, 'R')
