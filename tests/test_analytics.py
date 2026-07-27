@@ -1,10 +1,60 @@
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from tokstat import analytics, db_access, utils
 
 
 class TestAnalyticsUnit(unittest.TestCase):
+
+    def test_git_correlations_include_commits_without_telemetry(self):
+        commit_time = int(datetime(2026, 7, 26, 12, 0, 0).timestamp())
+        git_metadata = {
+            "branch": "main",
+            "commits": [{
+                "hash": "abcdef123456",
+                "timestamp": commit_time,
+                "message": "commit without matching telemetry",
+                "author": "Test Author",
+            }],
+        }
+
+        with patch.object(utils, "find_git_repo_path", return_value="/tmp/project"), patch.object(
+            utils, "get_git_metadata", return_value=git_metadata
+        ):
+            commits, branches, repos = analytics.compute_git_correlations({"project": []})
+
+        self.assertEqual(len(commits), 1)
+        self.assertEqual(commits[0]["tokens"], 0)
+        self.assertEqual(commits[0]["requests"], 0)
+        self.assertFalse(commits[0]["has_telemetry"])
+        self.assertEqual(branches, {"project": "main"})
+        self.assertEqual(repos["project"]["commits_count"], 1)
+
+    def test_analytics_normalizes_models_in_client_events(self):
+        mock_event = {
+            "event_id": "ev-1",
+            "occurred_at": "2026-07-26T10:00:00Z",
+            "workspace_id": "test-repo",
+            "session_id": "sess-1",
+            "turn_id": "1",
+            "model_raw": "gpt_5_3_codex",
+            "agent_name": "codex",
+            "input_tokens": 1000,
+            "output_tokens": 200,
+            "cache_read_tokens": 500,
+            "total_tokens": 1700,
+            "requests": 1,
+            "status": "ok",
+        }
+
+        with patch.object(db_access, "fetch_all_events", return_value=[mock_event]), patch.object(
+            db_access, "query_copilot_db", return_value=(0, 0, 0, 0)
+        ), patch.object(db_access, "fetch_balance_observations", return_value={}):
+            report = analytics.compute_analytics()
+
+        self.assertEqual(report["events"][0]["model"], "gpt-5.3-codex")
+        self.assertEqual(report["models"][0]["model_name"], "gpt-5.3-codex")
 
     def test_cost_estimation(self):
         # Test default fallback model

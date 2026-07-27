@@ -116,43 +116,46 @@ def compute_git_correlations(events_by_project):
             # Filter events in this window (window_start, commit_time]
             matched_events = [ev for ts, ev in p_events_parsed if window_start < ts <= commit_time]
             
+            total_tokens = sum(ev["total_tokens"] for ev in matched_events)
+            input_tokens = sum(ev["input_tokens"] for ev in matched_events)
+            output_tokens = sum(ev["output_tokens"] for ev in matched_events)
+            cache_read = sum(ev["cache_read_tokens"] for ev in matched_events)
+
+            coding_time_sec = 0
             if matched_events:
-                total_tokens = sum(ev["total_tokens"] for ev in matched_events)
-                input_tokens = sum(ev["input_tokens"] for ev in matched_events)
-                output_tokens = sum(ev["output_tokens"] for ev in matched_events)
-                cache_read = sum(ev["cache_read_tokens"] for ev in matched_events)
-                
-                # Estimated coding time before commit
+                # Estimate coding time only when there is event evidence.
                 first_event_ts = min(ts for ts, ev in p_events_parsed if window_start < ts <= commit_time)
                 coding_time_sec = int(commit_time - first_event_ts)
-                # Keep it positive and sensible (e.g. at least 1 min, at most 4 hours)
                 coding_time_sec = max(60, min(coding_time_sec, 4 * 3600))
-                
-                cost, savings = 0.0, 0.0
-                for ev in matched_events:
-                    c_val, s_val = utils.estimate_token_cost_and_savings(
-                        ev["model_raw"], ev["input_tokens"], ev["output_tokens"], ev["cache_read_tokens"]
-                    )
-                    cost += c_val
-                    savings += s_val
-                
-                correlated_commits.append({
-                    "project": project,
-                    "hash": commit["hash"][:8],
-                    "message": commit["message"],
-                    "author": commit["author"],
-                    "timestamp": commit_time,
-                    "datetime": datetime.fromtimestamp(commit_time).strftime("%Y-%m-%d %H:%M:%S"),
-                    "branch": branch,
-                    "tokens": total_tokens,
-                    "input": input_tokens,
-                    "output": output_tokens,
-                    "cache_read": cache_read,
-                    "coding_time": coding_time_sec,
-                    "cost": cost,
-                    "savings": savings,
-                    "requests": len(matched_events)
-                })
+
+            cost, savings = 0.0, 0.0
+            for ev in matched_events:
+                c_val, s_val = utils.estimate_token_cost_and_savings(
+                    ev["model_raw"], ev["input_tokens"], ev["output_tokens"], ev["cache_read_tokens"]
+                )
+                cost += c_val
+                savings += s_val
+
+            # Show every commit so users can distinguish commits without a
+            # telemetry match from commits for which telemetry was observed.
+            correlated_commits.append({
+                "project": project,
+                "hash": commit["hash"][:8],
+                "message": commit["message"],
+                "author": commit["author"],
+                "timestamp": commit_time,
+                "datetime": datetime.fromtimestamp(commit_time).strftime("%Y-%m-%d %H:%M:%S"),
+                "branch": branch,
+                "tokens": total_tokens,
+                "input": input_tokens,
+                "output": output_tokens,
+                "cache_read": cache_read,
+                "coding_time": coding_time_sec,
+                "cost": cost,
+                "savings": savings,
+                "requests": len(matched_events),
+                "has_telemetry": bool(matched_events),
+            })
 
     # Sort final correlated commits newest first
     correlated_commits.sort(key=lambda c: c["timestamp"], reverse=True)
@@ -171,7 +174,7 @@ def compute_analytics():
         "event_id": e.get("event_id"), "occurred_at": e.get("occurred_at"),
         "project": e.get("workspace_id") or "Global/No Project",
         "session_id": e.get("session_id") or "Global/No Session",
-        "turn_id": e.get("turn_id"), "model": e.get("model_raw") or "System/Tools",
+        "turn_id": e.get("turn_id"), "model": utils.normalize_model_display_name(e.get("model_raw")),
         "tool": e.get("agent_name") or "Unknown", "input": e.get("input_tokens", 0),
         "output": e.get("output_tokens", 0), "cache_read": e.get("cache_read_tokens", 0),
         "total": e.get("total_tokens", 0), "requests": e.get("requests", 1),
@@ -221,7 +224,7 @@ def compute_analytics():
         reqs = ev.get('requests') or 1
         
         ws = ev.get('workspace_id') or 'Global/No Project'
-        model = ev.get('model_raw') or 'System/Tools'
+        model = utils.normalize_model_display_name(ev.get('model_raw'))
         agent = ev.get('agent_name') or 'Unknown'
         
         cost, savings = utils.estimate_token_cost_and_savings(model, inp, out, cread)
