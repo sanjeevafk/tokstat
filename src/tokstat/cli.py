@@ -14,7 +14,9 @@ from . import analytics, exporter, renderer
 
 # Default Paths
 DB_PATH = os.path.expanduser("~/.local/state/openusage/telemetry.db")
-OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openusage_dashboard.html")
+# Write beside the command invocation so the reported path is the dashboard the
+# user can actually open, rather than an implementation file inside the package.
+OUTPUT_PATH = os.path.abspath("openusage_dashboard.html")
 
 class TelemetryHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):

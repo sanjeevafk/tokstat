@@ -2050,6 +2050,12 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             return hrs + 'h ' + remainingMins + 'm';
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>'"]/g, char => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            })[char]);
+        }
+
         // Live Server Polling for updates
         if (watchModeActive) {
             const statusIndicator = document.getElementById('connection-status');
@@ -2202,7 +2208,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             });
         }
 
-        function switchTab(tabId) {
+        function switchTab(tabId, { preserveDrilldown = false } = {}) {
             currentTab = tabId;
             localStorage.setItem('obs_tab', tabId);
             
@@ -2220,13 +2226,15 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 }
             });
 
-            // Reset drilldowns when switching top level tab
-            repoDrillId = null;
-            sessionDrillId = null;
-            document.getElementById('subview-repos-list').style.display = 'block';
-            document.getElementById('subview-repo-drilldown').style.display = 'none';
-            document.getElementById('subview-sessions-list').style.display = 'block';
-            document.getElementById('subview-session-drilldown').style.display = 'none';
+            // Top-level navigation exits drilldowns; drilldown navigation preserves its target.
+            if (!preserveDrilldown) {
+                repoDrillId = null;
+                sessionDrillId = null;
+                document.getElementById('subview-repos-list').style.display = 'block';
+                document.getElementById('subview-repo-drilldown').style.display = 'none';
+                document.getElementById('subview-sessions-list').style.display = 'block';
+                document.getElementById('subview-session-drilldown').style.display = 'none';
+            }
 
             // Update breadcrumb
             updateBreadcrumb();
@@ -2257,9 +2265,9 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             const breadcrumbTrail = document.getElementById('breadcrumb-trail');
             let text = `<span>Observatory</span> &gt; <span class="current">${currentTab.charAt(0).toUpperCase() + currentTab.slice(1)}</span>`;
             if (repoDrillId) {
-                text = `<span style="cursor:pointer;" onclick="exitRepoDrilldown()">Observatory &gt; Repositories</span> &gt; <span class="current">${repoDrillId}</span>`;
+                text = `<span style="cursor:pointer;" onclick="exitRepoDrilldown()">Observatory &gt; Repositories</span> &gt; <span class="current">${escapeHtml(repoDrillId)}</span>`;
             } else if (sessionDrillId) {
-                text = `<span style="cursor:pointer;" onclick="exitSessionDrilldown()">Observatory &gt; Sessions</span> &gt; <span class="current">Session: ${sessionDrillId.slice(0, 8)}</span>`;
+                text = `<span style="cursor:pointer;" onclick="exitSessionDrilldown()">Observatory &gt; Sessions</span> &gt; <span class="current">Session: ${escapeHtml(sessionDrillId.slice(0, 8))}</span>`;
             }
             breadcrumbTrail.innerHTML = text;
         }
@@ -2534,11 +2542,11 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 row.className = 'clickable-row';
                 row.onclick = () => drilldownRepo(r.name);
                 row.innerHTML = `
-                    <td><span style="font-weight:600;">${r.name}</span></td>
+                    <td><span style="font-weight:600;">${escapeHtml(r.name)}</span></td>
                     <td style="text-align: right; font-family: monospace;">${formatNumber(r.tokens)}</td>
                     <td style="text-align: right;">${r.sessions}</td>
                     <td style="text-align: right;"><span class="pill pill-emerald">cache</span></td>
-                    <td><span class="pill">${branch}</span></td>
+                    <td><span class="pill">${escapeHtml(branch)}</span></td>
                 `;
                 reposTbody.appendChild(row);
             });
@@ -2572,7 +2580,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 row.className = 'clickable-row';
                 row.onclick = () => drilldownSession(s.id);
                 row.innerHTML = `
-                    <td><span class="session-id-link">${s.id.slice(0, 8)}</span></td>
+                    <td><span class="session-id-link">${escapeHtml(s.id.slice(0, 8))}</span></td>
                     <td style="text-align: right; font-family: monospace; font-weight: 600;" class="text-cyan">${formatNumber(s.tokens)}</td>
                     <td>${formatDuration(s.duration)}</td>
                     <td style="font-size: 0.8rem; color: var(--text-secondary);">${s.start.toLocaleDateString()}</td>
@@ -2740,7 +2748,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
         function drilldownRepo(repoName) {
             repoDrillId = repoName;
             updateBreadcrumb();
-            switchTab('repositories');
+            switchTab('repositories', { preserveDrilldown: true });
         }
 
         function exitRepoDrilldown() {
@@ -2842,7 +2850,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 tr.className = 'clickable-row';
                 tr.onclick = () => drilldownRepo(r.repository);
                 tr.innerHTML = `
-                    <td><span style="font-weight: 600;">${r.repository}</span></td>
+                    <td><span style="font-weight: 600;">${escapeHtml(r.repository)}</span></td>
                     <td style="text-align: right; font-family: monospace; font-weight:600;">${formatNumber(r.tokens)}</td>
                     <td style="text-align: right; font-family: monospace; color: var(--text-secondary);">${formatNumber(r.input)}</td>
                     <td style="text-align: right; font-family: monospace; color: var(--accent-orange);">${formatNumber(r.output)}</td>
@@ -2851,7 +2859,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <td style="text-align: right;">${r.requests}</td>
                     <td style="text-align: right;">${r.sessions}</td>
                     <td style="text-align: right; color: var(--accent-purple); font-weight: 600;">${r.commits_count}</td>
-                    <td style="font-size: 0.8rem; color: var(--text-secondary);">${r.latest_activity}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(r.latest_activity)}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -2911,7 +2919,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 const pct = totalTokens > 0 ? (modelsMap[m] / totalTokens * 100).toFixed(1) : 0;
                 modelsList.innerHTML += `
                     <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
-                        <span class="pill pill-purple" style="max-width:160px; overflow:hidden; text-overflow:ellipsis;" title="${m}">${m}</span>
+                        <span class="pill pill-purple" style="max-width:160px; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(m)}">${escapeHtml(m)}</span>
                         <span style="font-family:monospace;">${formatNumber(modelsMap[m])} (${pct}%)</span>
                     </div>
                 `;
@@ -2925,7 +2933,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 const pct = totalTokens > 0 ? (toolsMap[t] / totalTokens * 100).toFixed(1) : 0;
                 toolsList.innerHTML += `
                     <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
-                        <span class="pill pill-orange">${staticTool.display_name}</span>
+                        <span class="pill pill-orange">${escapeHtml(staticTool.display_name)}</span>
                         <span style="font-family:monospace;">${formatNumber(toolsMap[t])} (${pct}%)</span>
                     </div>
                 `;
@@ -2973,9 +2981,9 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 repoCommits.forEach(c => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td><span class="pill pill-purple">${c.hash}</span></td>
-                        <td style="white-space:nowrap; font-size:0.75rem; color:var(--text-secondary);">${c.datetime}</td>
-                        <td style="font-weight:500;">${c.message}</td>
+                        <td><span class="pill pill-purple">${escapeHtml(c.hash)}</span></td>
+                        <td style="white-space:nowrap; font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(c.datetime)}</td>
+                        <td style="font-weight:500;">${escapeHtml(c.message)}</td>
                         <td style="text-align:right; font-family:monospace; font-weight:600;" class="text-orange">${formatNumber(c.tokens)}</td>
                         <td style="text-align:right;">${c.requests}</td>
                         <td style="text-align:right; font-size:0.8rem; color:var(--accent-cyan); font-weight:600;">${formatDuration(c.coding_time)}</td>
@@ -2990,7 +2998,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
         function drilldownSession(sessId) {
             sessionDrillId = sessId;
             updateBreadcrumb();
-            switchTab('sessions');
+            switchTab('sessions', { preserveDrilldown: true });
         }
 
         function exitSessionDrilldown() {
@@ -3087,9 +3095,9 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 tr.className = 'clickable-row';
                 tr.onclick = () => drilldownSession(s.session_id);
                 tr.innerHTML = `
-                    <td><span class="session-id-link">${s.session_id.slice(0, 8)}</span></td>
-                    <td><span style="font-weight: 500;">${s.project}</span></td>
-                    <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.start}</td>
+                    <td><span class="session-id-link">${escapeHtml(s.session_id.slice(0, 8))}</span></td>
+                    <td><span style="font-weight: 500;">${escapeHtml(s.project)}</span></td>
+                    <td style="color: var(--text-secondary); font-size: 0.8rem;">${escapeHtml(s.start)}</td>
                     <td style="text-align: right; font-weight:500;">${formatDuration(s.duration)}</td>
                     <td style="text-align: right;">${s.requests}</td>
                     <td style="text-align: right; font-family: monospace; font-weight:600;" class="text-cyan">${formatNumber(s.total_tokens)}</td>
@@ -3136,7 +3144,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 mixContainer.innerHTML += `
                     <div>
                         <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:0.25rem;">
-                            <span>${m.model}</span>
+                            <span>${escapeHtml(m.model)}</span>
                             <span style="font-family:monospace; font-weight:600;">${formatNumber(m.tokens)} (${pct}%)</span>
                         </div>
                         <div style="height:6px; background-color:var(--border-color); border-radius:3px; overflow:hidden;">
@@ -3157,11 +3165,11 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         <div class="timeline-dot ${dotClass}"></div>
                         <div class="timeline-content">
                             <div class="timeline-header">
-                                <span class="pill pill-purple">Turn #${turn.turn_id}</span>
-                                <span class="timeline-time">${turn.occurred_at}</span>
+                                <span class="pill pill-purple">Turn #${escapeHtml(turn.turn_id)}</span>
+                                <span class="timeline-time">${escapeHtml(turn.occurred_at)}</span>
                             </div>
                             <div style="display:flex; flex-wrap:wrap; gap:1.5rem; margin-top:0.5rem; font-size:0.8rem;">
-                                <div><span style="color:var(--text-secondary);">Model:</span> <span style="font-weight:600;">${turn.model}</span></div>
+                                <div><span style="color:var(--text-secondary);">Model:</span> <span style="font-weight:600;">${escapeHtml(turn.model)}</span></div>
                                 <div><span style="color:var(--text-secondary);">Input:</span> <span style="font-family:monospace;">${formatNumber(turn.input)}</span></div>
                                 <div><span style="color:var(--text-secondary);">Gen (Out):</span> <span style="font-family:monospace; color:var(--accent-orange);">${formatNumber(turn.output)}</span></div>
                                 <div><span style="color:var(--text-secondary);">Cached:</span> <span style="font-family:monospace; color:var(--accent-emerald);">${formatNumber(turn.cache_read)}</span></div>
@@ -3235,7 +3243,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td><span class="pill pill-purple" style="font-weight:600;">${m.model_name}</span></td>
+                    <td><span class="pill pill-purple" style="font-weight:600;">${escapeHtml(m.model_name)}</span></td>
                     <td style="text-align: right; font-family: monospace; font-weight: 600;">${formatNumber(m.total_tokens)}</td>
                     <td style="text-align: right;">${m.requests}</td>
                     <td style="text-align: right; font-family: monospace;">${formatNumber(m.average_context)}</td>
@@ -3243,7 +3251,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <td style="text-align: right; font-weight: 600;" class="text-emerald">${cacheRatio.toFixed(1)}%</td>
                     <td style="text-align: right; font-family: monospace; font-weight:600;">$${m.estimated_cost.toFixed(2)}</td>
                     <td style="text-align: right; font-family: monospace; color:var(--text-secondary);">$${m.estimated_savings.toFixed(2)}</td>
-                    <td style="font-size:0.8rem; color:var(--text-secondary); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${reposStr}">${reposStr}</td>
+                    <td style="font-size:0.8rem; color:var(--text-secondary); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(reposStr)}">${escapeHtml(reposStr)}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -3420,14 +3428,14 @@ def generate_html_report(report_data, output_path, watch_mode=False):
 
             toolsArr.forEach(t => {
                 const cachePct = t.cache_ratio * 100;
-                
                 grid.innerHTML += `
                     <div class="metric-card card-glow-orange">
                         <div class="metric-header">
-            toolsArr.forEach(t => {
-                const cachePct = t.cache_ratio * 100;
+                            <span>${escapeHtml(t.display_name)}</span>
                             <span class="text-emerald" style="font-weight:600;">${cachePct.toFixed(1)}% cached</span>
                         </div>
+                        <div class="metric-value">${formatNumber(t.total_tokens)}</div>
+                        <div class="metric-subtitle">${t.requests} requests · ${escapeHtml(t.models.join(', ') || 'No model data')}</div>
                     </div>
                 `;
             });
@@ -3442,12 +3450,12 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td><span style="font-weight: 600;">${t.display_name}</span> <span class="pill">${t.tool_name}</span></td>
+                    <td><span style="font-weight: 600;">${escapeHtml(t.display_name)}</span> <span class="pill">${escapeHtml(t.tool_name)}</span></td>
                     <td style="text-align: right; font-family: monospace; font-weight: 600;">${formatNumber(t.total_tokens)}</td>
                     <td style="text-align: right;">${t.requests}</td>
                     <td style="text-align: right; font-weight: 600;" class="text-emerald">${cacheHit.toFixed(1)}%</td>
-                    <td style="font-size: 0.8rem; color: var(--text-secondary);">${reposStr}</td>
-                    <td style="font-size: 0.8rem; color: var(--text-secondary);">${modelsStr}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(reposStr)}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(modelsStr)}</td>
                     <td style="text-align: right; font-weight: 500;">${formatDuration(t.avg_session_length)}</td>
                 `;
                 tbody.appendChild(tr);
@@ -3658,11 +3666,11 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         tr.className = 'clickable-row';
                         tr.onclick = () => drilldownRepo(c.project);
                         tr.innerHTML = `
-                            <td><span style="font-weight:700;">${c.project}</span></td>
-                            <td><span class="pill pill-purple">${c.hash}</span></td>
-                            <td><span class="pill">${c.branch}</span></td>
-                            <td style="white-space:nowrap; font-size:0.75rem; color:var(--text-secondary);">${c.datetime}</td>
-                            <td style="font-weight:500; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.message}</td>
+                            <td><span style="font-weight:700;">${escapeHtml(c.project)}</span></td>
+                            <td><span class="pill pill-purple">${escapeHtml(c.hash)}</span></td>
+                            <td><span class="pill">${escapeHtml(c.branch)}</span></td>
+                            <td style="white-space:nowrap; font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(c.datetime)}</td>
+                            <td style="font-weight:500; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.message)}</td>
                             <td style="text-align:right;">${c.requests}</td>
                             <td style="text-align:right; font-family:monospace; font-weight:600;" class="text-orange">${formatNumber(c.tokens)}</td>
                             <td style="text-align:right; font-size:0.8rem; font-weight:600; color:var(--accent-cyan);">${formatDuration(c.coding_time)}</td>
