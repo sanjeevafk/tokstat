@@ -557,9 +557,9 @@ def compute_analytics():
 
         for raw_m_key, m_obs in model_obs_data.items():
             # Format display model name: gpt_5_3_codex -> gpt-5.3-codex
-            canonical_m_name = raw_m_key.replace('_', '-').replace('-codex', '-codex')
+            canonical_m_name = utils.normalize_model_display_name(raw_m_key)
             # find matching key in models_dict
-            match_key = next((k for k in models_dict if k.replace('_', '-').replace('.', '-') == canonical_m_name.replace('.', '-')), None)
+            match_key = next((k for k in models_dict if utils.normalize_model_display_name(k) == canonical_m_name), None)
             target_key = match_key or canonical_m_name
 
             if target_key not in models_dict:

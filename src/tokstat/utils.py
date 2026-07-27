@@ -1,6 +1,24 @@
 # utils.py
 import os
+import re
 import subprocess
+
+
+def normalize_model_display_name(raw):
+    """
+    Normalizes raw or sanitized model names into clean display identifiers.
+    e.g., gpt_5_3_codex -> gpt-5.3-codex, claude_sonnet_4_6 -> claude-sonnet-4.6
+    """
+    if not raw:
+        return 'System/Tools'
+    s = str(raw).strip()
+    m = re.match(r'^([a-zA-Z0-9]+(?:_[a-zA-Z0-9]+)*?)_(\d+)_(\d+)(.*)$', s)
+    if m:
+        prefix, major, minor, rest = m.groups()
+        prefix = prefix.replace('_', '-')
+        rest = rest.replace('_', '-')
+        return f'{prefix}-{major}.{minor}{rest}'
+    return s.replace('_', '-')
 
 
 def find_git_repo_path(workspace_id):
