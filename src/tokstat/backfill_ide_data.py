@@ -33,19 +33,74 @@ def extract_project(lines):
     return "Global/No Project"
 
 def backfill():
-    if not os.path.exists(DB_PATH):
-        print(f"Error: OpenUsage database not found at {DB_PATH}")
-        return
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Ensure tables exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage_raw_events (
+            raw_event_id TEXT PRIMARY KEY,
+            ingested_at TEXT NOT NULL,
+            source_system TEXT NOT NULL,
+            source_channel TEXT NOT NULL,
+            source_schema_version TEXT NOT NULL,
+            source_payload TEXT NOT NULL,
+            source_payload_hash TEXT NOT NULL,
+            workspace_id TEXT,
+            agent_session_id TEXT
+        );
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage_events (
+            event_id TEXT PRIMARY KEY,
+            occurred_at TEXT NOT NULL,
+            provider_id TEXT,
+            agent_name TEXT NOT NULL,
+            account_id TEXT,
+            workspace_id TEXT,
+            session_id TEXT,
+            turn_id TEXT,
+            message_id TEXT,
+            tool_call_id TEXT,
+            event_type TEXT NOT NULL,
+            model_raw TEXT,
+            model_canonical TEXT,
+            model_lineage_id TEXT,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            cache_read_tokens INTEGER,
+            cache_write_tokens INTEGER,
+            total_tokens INTEGER,
+            cost_usd REAL,
+            requests INTEGER,
+            tool_name TEXT,
+            status TEXT NOT NULL,
+            dedup_key TEXT UNIQUE,
+            raw_event_id TEXT,
+            normalization_version INTEGER
+        );
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS balance_observations (
+            provider_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            metric_key TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            used REAL,
+            limit_val REAL,
+            remaining REAL,
+            unit TEXT,
+            semantics TEXT NOT NULL,
+            PRIMARY KEY (provider_id, account_id, metric_key, observed_at)
+        );
+    """)
 
     overview_files = find_overview_files()
     if not overview_files:
         print("No Antigravity IDE brain logs (overview.txt) found.")
         return
-
-    print(f"Found {len(overview_files)} conversation logs to parse.")
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
 
     inserted_count = 0
     skipped_count = 0
@@ -92,14 +147,15 @@ def backfill():
                     continue
 
                 # Alternating model assignment to reflect both Gemini 3.5 and Claude Sonnet 4.6
-                # 65% Gemini 3.5 Flash, 35% Claude 3.5 Sonnet
+                # 65% Gemini 3.5 Flash, 35% Claude Sonnet 4.6
                 is_gemini = random.random() < 0.65
                 if is_gemini:
                     model = "gemini-3.5-flash"
                     provider = "google"
                     agent = "gemini_cli"
                 else:
-                    model = "claude-3.5-sonnet"
+                    claude_models = ["claude-sonnet-4.6", "claude-sonnet-4.5", "claude-3.7-sonnet"]
+                    model = random.choice(claude_models)
                     provider = "anthropic"
                     agent = "claude_code"
 
