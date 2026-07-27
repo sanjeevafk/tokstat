@@ -14,6 +14,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Engineering Observatory - Token Telemetry</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none'><rect width='64' height='64' rx='16' fill='%23080b13'/><rect x='1' y='1' width='62' height='62' rx='15' stroke='%231c2336' stroke-width='2'/><path d='M14 42L25 28L36 34L49 18' stroke='url(%23g)' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/><circle cx='14' cy='42' r='3.5' fill='%237ed7bd'/><circle cx='25' cy='28' r='3.5' fill='%23ff7a00'/><circle cx='36' cy='34' r='3.5' fill='%23b9dc75'/><circle cx='49' cy='18' r='4' fill='%237ed7bd'/><rect x='12' y='46' width='4' height='6' rx='1' fill='%237ed7bd' opacity='0.5'/><rect x='23' y='34' width='4' height='18' rx='1' fill='%23ff7a00' opacity='0.5'/><rect x='34' y='40' width='4' height='12' rx='1' fill='%23b9dc75' opacity='0.5'/><rect x='47' y='24' width='4' height='28' rx='1' fill='%237ed7bd' opacity='0.5'/><defs><linearGradient id='g' x1='14' y1='42' x2='49' y2='18' gradientUnits='userSpaceOnUse'><stop stop-color='%237ed7bd'/><stop offset='0.4' stop-color='%23ff7a00'/><stop offset='1' stop-color='%23b9dc75'/></linearGradient></defs></svg>">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
