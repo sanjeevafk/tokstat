@@ -154,7 +154,7 @@ def backfill():
                     provider = "google"
                     agent = "gemini_cli"
                 else:
-                    claude_models = ["claude-sonnet-4.6", "claude-sonnet-4.5", "claude-3.7-sonnet"]
+                    claude_models = ["claude-sonnet-4.6", "claude-sonnet-4.5"]
                     model = random.choice(claude_models)
                     provider = "anthropic"
                     agent = "claude_code"
