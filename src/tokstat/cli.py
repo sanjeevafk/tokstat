@@ -1,4 +1,17 @@
-# visualize_usage.py
+# cli.py
+"""TokStat CLI - AI Engineering Telemetry Observatory & Token Tracker.
+
+Commands:
+  tokstat                       gather usage from all sources, generate
+                                tokstat_dashboard.html and open it
+  tokstat --no-collect          render the dashboard only (skip gathering)
+  tokstat --no-open             do not auto-open the browser
+  tokstat --watch [--port N]    live-sync watch mode
+  tokstat --export <dir>        multi-format exports
+  tokstat migrate [--force]     import legacy OpenUsage/Tokentop DBs
+  tokstat collect --once        run all collectors once
+  tokstat daemon start|stop|status
+"""
 import argparse
 import http.server
 import json
@@ -7,16 +20,12 @@ import socketserver
 import sys
 import threading
 import time
+import webbrowser
 from datetime import datetime
 
-# Import refactored modules
-from . import analytics, exporter, renderer
+from . import analytics, config, exporter, migration, renderer
+from .collectors import run_collectors_once
 
-# Default Paths
-DB_PATH = os.path.expanduser("~/.local/state/openusage/telemetry.db")
-# Write beside the command invocation so the reported path is the dashboard the
-# user can actually open, rather than an implementation file inside the package.
-OUTPUT_PATH = os.path.abspath("openusage_dashboard.html")
 
 class TelemetryHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -44,15 +53,17 @@ class TelemetryHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_error(404, "Not Found")
 
+
 def run_server(port):
     socketserver.TCPServer.allow_reuse_address = True
-    server_address = ("", port)
+    server_address = (config.SERVER_HOST, port)  # localhost only (security)
     try:
         with socketserver.TCPServer(server_address, TelemetryHandler) as httpd:
-            print(f"[*] Live sync API server started at http://localhost:{port}/data")
+            print(f"[*] Live sync API server started at http://{config.SERVER_HOST}:{port}/data")
             httpd.serve_forever()
     except Exception as e:
         print(f"Error starting API server on port {port}: {e}", file=sys.stderr)
+
 
 def find_free_port(start_port):
     import socket
@@ -60,18 +71,21 @@ def find_free_port(start_port):
     while port < 6000:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(("", port))
+                s.bind((config.SERVER_HOST, port))
                 return port
             except OSError:
                 port += 1
     return start_port
 
+
 def generate_dashboard(watch_mode=False, server_port=5000):
-    if not os.path.exists(DB_PATH):
-        print(f"Error: OpenUsage database not found at {DB_PATH}")
+    # Bootstrap the native DB (schema + optional legacy migration).
+    migration.check_and_run_migrations()
+    if not os.path.exists(config.DB_PATH):
+        print(f"Error: TokStat database not found at {config.DB_PATH}")
         sys.exit(1)
 
-    print(f"Reading OpenUsage telemetry database from {DB_PATH}...")
+    print(f"Reading TokStat telemetry database from {config.DB_PATH}...")
     report_data = analytics.compute_analytics()
 
     if not report_data:
@@ -99,16 +113,14 @@ def generate_dashboard(watch_mode=False, server_port=5000):
             "git_integration": {"correlated_commits": [], "active_branches": {}, "repos_git_info": {}}
         }
 
-    # Generate HTML content in both directories
-    renderer.generate_html_report(report_data, OUTPUT_PATH, watch_mode=watch_mode)
-    alternate_path = os.path.expanduser("~/Downloads/openusage_dashboard.html")
-    
-    # Post-process generated HTML to inject selected port
-    for path in {OUTPUT_PATH, alternate_path}:
+    # Generate HTML in the primary + backwards-compatible paths
+    output_paths = [config.DASHBOARD_PATH]
+    if config.COMPAT_DASHBOARD_PATH != config.DASHBOARD_PATH:
+        output_paths.append(config.COMPAT_DASHBOARD_PATH)
+
+    for path in output_paths:
         try:
-            if path == alternate_path and path != OUTPUT_PATH:
-                renderer.generate_html_report(report_data, path, watch_mode=watch_mode)
-            
+            renderer.generate_html_report(report_data, path, watch_mode=watch_mode)
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
             content = content.replace("__SERVER_PORT__", str(server_port))
@@ -117,8 +129,9 @@ def generate_dashboard(watch_mode=False, server_port=5000):
         except Exception as e:
             print(f"Warning: Failed to process dashboard HTML at {path}: {e}")
 
-    print(f"Success! Beautiful HTML dashboard generated at {OUTPUT_PATH}")
+    print(f"Success! Beautiful HTML dashboard generated at {config.DASHBOARD_PATH}")
     print("You can double-click this file or open it in your browser to view your local token statistics.")
+
 
 def start_watch_mode(start_port):
     # 1. Determine a free port for the live sync API
@@ -132,17 +145,17 @@ def start_watch_mode(start_port):
     server_thread = threading.Thread(target=run_server, args=(port,), daemon=True)
     server_thread.start()
 
-    # 4. Monitor database for updates in main thread
+    # 4. Monitor the native database for updates in main thread
     last_mtime = 0
-    if os.path.exists(DB_PATH):
-        last_mtime = os.path.getmtime(DB_PATH)
+    if os.path.exists(config.DB_PATH):
+        last_mtime = os.path.getmtime(config.DB_PATH)
 
     print("[*] Observatory is watching telemetry.db for updates... (Press Ctrl+C to quit)")
     try:
         while True:
-            time.sleep(3)
-            if os.path.exists(DB_PATH):
-                current_mtime = os.path.getmtime(DB_PATH)
+            time.sleep(config.WATCH_POLL_INTERVAL_SEC)
+            if os.path.exists(config.DB_PATH):
+                current_mtime = os.path.getmtime(config.DB_PATH)
                 if current_mtime != last_mtime:
                     print(f"\n[+] Telemetry database updated at {datetime.now().strftime('%H:%M:%S')}. Regenerating dashboard...")
                     try:
@@ -153,11 +166,13 @@ def start_watch_mode(start_port):
     except KeyboardInterrupt:
         print("\n[*] Exiting watch mode. Goodbye!")
 
+
 def run_exports(export_dir):
-    if not os.path.exists(DB_PATH):
-        print(f"Error: OpenUsage database not found at {DB_PATH}", file=sys.stderr)
+    migration.check_and_run_migrations()
+    if not os.path.exists(config.DB_PATH):
+        print(f"Error: TokStat database not found at {config.DB_PATH}", file=sys.stderr)
         sys.exit(1)
-        
+
     if not os.path.exists(export_dir):
         try:
             os.makedirs(export_dir)
@@ -167,7 +182,7 @@ def run_exports(export_dir):
 
     print(f"[*] Running data exports to directory: {export_dir}")
     report_data = analytics.compute_analytics()
-    
+
     if not report_data:
         print("Error: No data available to export.", file=sys.stderr)
         sys.exit(1)
@@ -177,25 +192,119 @@ def run_exports(export_dir):
     exporter.export_csv(report_data, export_dir)
     exporter.export_markdown(report_data, os.path.join(export_dir, "observatory_report.md"))
     exporter.export_pdf(report_data, os.path.join(export_dir, "observatory_report.pdf"))
-    
+
     # Export copy of the dashboard HTML
-    renderer.generate_html_report(report_data, os.path.join(export_dir, "observatory_dashboard.html"), watch_mode=False)
+    renderer.generate_html_report(
+        report_data, os.path.join(export_dir, config.EXPORT_DASHBOARD_NAME), watch_mode=False
+    )
     print(f"[+] All exports completed successfully in {export_dir}!")
 
+
+# --- subcommands -----------------------------------------------------------
+def cmd_daemon(action):
+    from . import daemon
+    if action == "start":
+        daemon.start_daemon()
+    elif action == "stop":
+        daemon.stop_daemon()
+    elif action == "status":
+        print(json.dumps(daemon.daemon_status(), indent=2))
+
+
+def cmd_migrate(force):
+    result = migration.check_and_run_migrations(force=force, explicit=True)
+    print(json.dumps(result, indent=2))
+
+
+def cmd_collect(once):
+    if not once:
+        print("Only `tokstat collect --once` is supported for now.", file=sys.stderr)
+        sys.exit(2)
+    run_collectors_once()
+
+
+def _open_dashboard(path):
+    """Best-effort open of the generated dashboard in the default browser."""
+    url = "file://" + os.path.abspath(path)
+    try:
+        opened = webbrowser.open(url)
+        if opened:
+            print(f"[*] Opened dashboard in your browser: {url}")
+        else:
+            print(f"[*] Dashboard ready at {url} - open it in your browser.")
+    except Exception as e:
+        print(f"[*] Dashboard ready at {url} (auto-open failed: {e})")
+
+
+def cmd_full_pipeline(no_collect=False, no_open=False):
+    """The default `tokstat` experience: migrate -> gather -> render -> open.
+
+    Idempotent end to end: legacy import runs once, collectors dedupe via
+    fingerprints, and the dashboard reflects the freshest data available.
+    """
+    # 1. Bootstrap the native DB (schema + optional read-only legacy import).
+    #    Explicit here because the collectors below need the schema to exist;
+    #    the render step re-checks it, which is idempotent and cheap.
+    migration.check_and_run_migrations()
+
+    # 2. Gather usage from every local source (Claude Code, Gemini, Aider,
+    #    Copilot, Cursor, legacy OpenUsage/tokentop sync, ...). Collectors are
+    #    individually fault-tolerant; the whole step is also guarded so a
+    #    catastrophic failure can never block dashboard generation.
+    if not no_collect:
+        try:
+            run_collectors_once()
+        except Exception as e:
+            print(f"Warning: usage gathering failed ({e}); rendering with existing data.", file=sys.stderr)
+
+    # 3. Render the dashboard.
+    generate_dashboard()
+
+    # 4. Open it (unless suppressed).
+    if not no_open:
+        _open_dashboard(config.DASHBOARD_PATH)
+
+
 def main():
+    argv = sys.argv[1:]
+
+    if argv and argv[0] == "daemon":
+        parser = argparse.ArgumentParser(prog="tokstat daemon")
+        parser.add_argument("action", choices=["start", "stop", "status"])
+        args = parser.parse_args(argv[1:])
+        cmd_daemon(args.action)
+        return
+
+    if argv and argv[0] == "migrate":
+        parser = argparse.ArgumentParser(prog="tokstat migrate")
+        parser.add_argument("--force", action="store_true", help="Re-run legacy import")
+        args = parser.parse_args(argv[1:])
+        cmd_migrate(args.force)
+        return
+
+    if argv and argv[0] == "collect":
+        parser = argparse.ArgumentParser(prog="tokstat collect")
+        parser.add_argument("--once", action="store_true", help="Run all collectors once")
+        args = parser.parse_args(argv[1:])
+        cmd_collect(args.once)
+        return
+
     parser = argparse.ArgumentParser(description="AI Engineering Observatory - Developer Token Tracker")
     parser.add_argument("--watch", action="store_true", help="Start watch mode with live updates")
     parser.add_argument("--port", type=int, default=5000, help="Port to run the live update server on (default: 5000)")
     parser.add_argument("--export", type=str, help="Export CSV, JSON, Markdown, HTML and PDF reports to the specified folder path")
-    
-    args = parser.parse_args()
+    parser.add_argument("--no-collect", action="store_true", help="Render the dashboard only, skipping the usage-gathering step")
+    parser.add_argument("--no-open", action="store_true", help="Do not auto-open the dashboard in a browser")
+
+    args = parser.parse_args(argv)
 
     if args.export:
         run_exports(args.export)
     elif args.watch:
         start_watch_mode(args.port)
     else:
-        generate_dashboard()
+        cmd_full_pipeline(no_collect=args.no_collect, no_open=args.no_open)
+
 
 if __name__ == "__main__":
     main()
