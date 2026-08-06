@@ -168,20 +168,28 @@ def compute_analytics():
     if not events:
         return {}
 
-    # Preserve valid usage events that have no session; the browser needs these
-    # for complete totals and filtering.
-    client_events = [{
-        "event_id": e.get("event_id"), "occurred_at": e.get("occurred_at"),
-        "project": e.get("workspace_id") or "Global/No Project",
-        "session_id": e.get("session_id") or "Global/No Session",
-        "turn_id": e.get("turn_id"), "model": utils.normalize_model_display_name(e.get("model_raw")),
-        "tool": e.get("agent_name") or "Unknown", "input": e.get("input_tokens", 0),
-        "output": e.get("output_tokens", 0), "cache_read": e.get("cache_read_tokens", 0),
-        "total": e.get("total_tokens", 0), "requests": e.get("requests", 1),
-        "cost": utils.estimate_token_cost_and_savings(
+    def _est_cost_and_savings(e):
+        return utils.estimate_token_cost_and_savings(
             e.get("model_raw"), e.get("input_tokens", 0), e.get("output_tokens", 0),
-            e.get("cache_read_tokens", 0))[0]
-    } for e in events]
+            e.get("cache_read_tokens", 0))
+
+    # Preserve valid usage events that have no session; the browser needs these
+    # for complete totals and filtering. `savings` rides along so the client's
+    # KPI/tables use the same per-model pricing as exports (no hardcoded rate).
+    client_events = []
+    for e in events:
+        est_cost, est_savings = _est_cost_and_savings(e)
+        client_events.append({
+            "event_id": e.get("event_id"), "occurred_at": e.get("occurred_at"),
+            "project": e.get("workspace_id") or "Global/No Project",
+            "session_id": e.get("session_id") or "Global/No Session",
+            "turn_id": e.get("turn_id"), "model": utils.normalize_model_display_name(e.get("model_raw")),
+            "tool": e.get("agent_name") or "Unknown", "input": e.get("input_tokens", 0),
+            "output": e.get("output_tokens", 0), "cache_read": e.get("cache_read_tokens", 0),
+            "total": e.get("total_tokens", 0), "requests": e.get("requests", 1),
+            "cost": est_cost,
+            "savings": est_savings
+        })
 
     # Initialize aggregators
     total_input = 0
@@ -329,7 +337,8 @@ def compute_analytics():
         "cache_read": total_cache_read,
     }
 
-    # Incorporate authoritative balance observations from OpenUsage daemon poller
+    # Incorporate authoritative balance observations (populated by legacy_sync
+    # from OpenUsage, or a future native provider poller).
     balance_obs = db_access.fetch_balance_observations()
     if balance_obs:
         obs_input = balance_obs.get('client_ide_input_tokens', 0) or balance_obs.get('provider_codex_input_tokens', 0)

@@ -1841,7 +1841,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <div class="panel-header">
                         <div>
                             <h2 class="panel-title">Git Commit Telemetry Correlation</h2>
-                            <p class="panel-subtitle">Correlates local project git repository history with OpenUsage telemetry data</p>
+                            <p class="panel-subtitle">Correlates local project git repository history with TokStat telemetry data</p>
                         </div>
                     </div>
                     
@@ -2455,8 +2455,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 
                 // Estimate cost using utils mappings client-side
                 cost += ev.cost;
-                // Savings
-                savings += (ev.cache_read * 0.000003); // Approx savings per token
+                // Savings (server-side per-model estimate, consistent with exports)
+                savings += ev.savings || 0;
                 
                 uniqueSessions.add(ev.session_id);
                 uniqueRepos.add(ev.project);
@@ -2485,6 +2485,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     totalOutput = go.total_output;
                     cachedTokens = go.cached_tokens;
                     cost = go.estimated_cost;
+                    savings = go.estimated_savings;
                 }
             }
 
@@ -3059,7 +3060,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 sess.cache_read += ev.cache_read;
                 sess.estimated_cost += ev.cost;
                 // Savings estimation
-                sess.estimated_savings += (ev.cache_read * 0.000003);
+                sess.estimated_savings += (ev.savings || 0);
 
                 if (ev.occurred_at < sess.start) sess.start = ev.occurred_at;
                 if (ev.occurred_at > sess.end) sess.end = ev.occurred_at;
@@ -3212,7 +3213,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 m.requests += 1;
                 if (ev.project) m.repositories_used.add(ev.project);
                 m.estimated_cost += ev.cost;
-                m.estimated_savings += (ev.cache_read * 0.000003);
+                m.estimated_savings += (ev.savings || 0);
             });
 
             const mData = Object.keys(modelAgg).map(k => {

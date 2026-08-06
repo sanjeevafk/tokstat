@@ -5,6 +5,7 @@ import re
 import sqlite3
 import sys
 
+from . import config, migration
 from .queries import (
     QUERY_ALL_EVENTS,
     QUERY_DAILY_ROLLUP,
@@ -13,9 +14,12 @@ from .queries import (
     QUERY_TOOL_TOTALS,
 )
 
-DB_PATH = os.path.expanduser("~/.local/state/openusage/telemetry.db")
-COPILOT_DB_PATH = os.path.expanduser("~/.copilot/session-store.db")
-TOKENTOP_DB_PATH = os.path.expanduser("~/.local/share/tokentop/usage.db")
+# Native database is the single source of truth for reads. Legacy OpenUsage /
+# Tokentop databases are optional augmentary sources consumed by the
+# legacy_sync collector (src/tokstat/collectors/legacy_sync.py).
+# Paths are read from config at CALL time so they stay patchable in tests and
+# the config module remains the single source of truth.
+
 
 def sanitize_field(value):
     """Strip control characters, newlines, and HTML tags from string fields.
@@ -30,28 +34,38 @@ def sanitize_field(value):
     value = value.replace('\x00', '')
     return value.strip() or None
 
+
 def get_db_connection(path):
+    """Open a SQLite database read-only style helper (returns None when absent)."""
     if not os.path.exists(path):
         return None
     try:
         conn = sqlite3.connect(path)
-        # return rows as dicts for convenience
         conn.row_factory = sqlite3.Row
         return conn
     except Exception as e:
         print(f"Error connecting to database at {path}: {e}", file=sys.stderr)
         return None
 
+
+def ensure_native_db():
+    """Bootstrap the native database (schema + optional legacy migration)."""
+    migration.check_and_run_migrations()
+
+
 def query_copilot_db():
-    # Returns (input, output, total, requests)
-    if not os.path.exists(COPILOT_DB_PATH):
+    """Estimate Copilot usage from ~/.copilot/session-store.db.
+    Returns (input, output, total, requests). Estimates only (status='estimated'
+    is applied by the copilot collector); analytics merges these totals."""
+    copilot_db_path = config.COPILOT_DB
+    if not os.path.exists(copilot_db_path):
         return 0, 0, 0, 0
     try:
-        conn = sqlite3.connect(COPILOT_DB_PATH)
+        conn = sqlite3.connect(copilot_db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = [t[0] for t in cursor.fetchall()]
-        
+
         if 'messages' in tables:
             cursor.execute("SELECT count(*), sum(length(content))/4 FROM messages;")
             res = cursor.fetchone()
@@ -65,16 +79,20 @@ def query_copilot_db():
         print(f"Warning: Could not read Copilot DB: {e}", file=sys.stderr)
     return 0, 0, 0, 0
 
+
 def fetch_tokentop_events():
-    if not os.path.exists(TOKENTOP_DB_PATH):
+    """Read Tokentop usage_events as normalized event dicts (legacy source).
+    Used by the legacy_sync collector; kept here for reuse."""
+    tokentop_db_path = config.LEGACY_TOKENTOP_DB
+    if not os.path.exists(tokentop_db_path):
         return []
-    conn = get_db_connection(TOKENTOP_DB_PATH)
+    conn = get_db_connection(tokentop_db_path)
     if not conn:
         return []
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT 
+            SELECT
                 id, timestamp, source, provider, model, agent_id, session_id, project_path,
                 input_tokens, output_tokens, cache_read_tokens, cost_usd, request_count
             FROM usage_events
@@ -87,16 +105,16 @@ def fetch_tokentop_events():
                 dt_obj = datetime.datetime.fromtimestamp(ts / 1000.0, datetime.timezone.utc)
             else:
                 dt_obj = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
-            
+
             occurred_at = dt_obj.strftime("%Y-%m-%dT%H:%M:%SZ")
             proj = os.path.basename(r['project_path']) if r['project_path'] else 'Global/No Project'
-            
+
             in_tok = r['input_tokens'] or 0
             out_tok = r['output_tokens'] or 0
             cache_tok = r['cache_read_tokens'] or 0
             cost_u = r['cost_usd'] or 0.0
             req_cnt = r['request_count'] or 1
-            
+
             rows.append({
                 "event_id": f"tokentop-{r['id']}",
                 "occurred_at": occurred_at,
@@ -123,79 +141,42 @@ def fetch_tokentop_events():
         return rows
     except Exception as e:
         print(f"Warning: Failed to fetch tokentop events: {e}", file=sys.stderr)
-        if conn: conn.close()
+        if conn:
+            conn.close()
         return []
 
+
+def _read_native_events():
+    """Read usage_events from the native DB (bootstrap first if needed)."""
+    if not os.path.exists(config.DB_PATH):
+        migration.check_and_run_migrations()
+    conn = config.connect_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(QUERY_ALL_EVENTS)
+        raw_rows = [dict(r) for r in cursor.fetchall()]
+        events = []
+        for row in raw_rows:
+            row['workspace_id'] = sanitize_field(row.get('workspace_id'))
+            row['model_raw'] = sanitize_field(row.get('model_raw'))
+            row['agent_name'] = sanitize_field(row.get('agent_name'))
+            events.append(row)
+        return events
+    except Exception as e:
+        print(f"Error running QUERY_ALL_EVENTS: {e}", file=sys.stderr)
+        return []
+    finally:
+        conn.close()
+
+
 def fetch_all_events():
-    conn = get_db_connection(DB_PATH)
-    ou_events = []
-    if conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute(QUERY_ALL_EVENTS)
-            raw_rows = [dict(r) for r in cursor.fetchall()]
-            ou_events = []
-            for row in raw_rows:
-                row['workspace_id'] = sanitize_field(row.get('workspace_id'))
-                row['model_raw'] = sanitize_field(row.get('model_raw'))
-                row['agent_name'] = sanitize_field(row.get('agent_name'))
-                ou_events.append(row)
-            conn.close()
-        except Exception as e:
-            print(f"Error running QUERY_ALL_EVENTS: {e}", file=sys.stderr)
-            if conn: conn.close()
-    else:
-        print(f"Warning: OpenUsage database not found at {DB_PATH}", file=sys.stderr)
-
-    tt_events = fetch_tokentop_events()
-    if not tt_events:
-        return ou_events
-
-    # Build unique fingerprints of OpenUsage events to avoid duplicate logging
-    # Fingerprint: (timestamp_10s_bucket, model, input_tokens, output_tokens)
-    ou_fingerprints = set()
-    for ev in ou_events:
-        ts_str = str(ev.get('occurred_at') or '')
-        try:
-            m = re.match(r'^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d)', ts_str)
-            ts_bucket = m.group(1) + " " + m.group(2) if m else ts_str[:15]
-        except Exception:
-            ts_bucket = ts_str[:15]
-        
-        fingerprint = (
-            ts_bucket,
-            str(ev.get('model_raw') or '').lower(),
-            ev.get('input_tokens') or 0,
-            ev.get('output_tokens') or 0
-        )
-        ou_fingerprints.add(fingerprint)
-
-    merged_events = list(ou_events)
-    for ev in tt_events:
-        ts_str = str(ev.get('occurred_at') or '')
-        try:
-            m = re.match(r'^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d)', ts_str)
-            ts_bucket = m.group(1) + " " + m.group(2) if m else ts_str[:15]
-        except Exception:
-            ts_bucket = ts_str[:15]
-
-        fingerprint = (
-            ts_bucket,
-            str(ev.get('model_raw') or '').lower(),
-            ev.get('input_tokens') or 0,
-            ev.get('output_tokens') or 0
-        )
-        
-        if fingerprint not in ou_fingerprints:
-            merged_events.append(ev)
-            ou_fingerprints.add(fingerprint)
-
-    merged_events.sort(key=lambda x: x.get('occurred_at') or '')
-    return merged_events
+    """All usage events from the native database (post-migration this includes
+    OpenUsage + Tokentop history; collectors and the ingestion server append)."""
+    return _read_native_events()
 
 
 def fetch_daily_rollup():
-    conn = get_db_connection(DB_PATH)
+    conn = config.connect_db()
     if not conn:
         return []
     try:
@@ -206,11 +187,13 @@ def fetch_daily_rollup():
         return rows
     except Exception as e:
         print(f"Error running QUERY_DAILY_ROLLUP: {e}", file=sys.stderr)
-        if conn: conn.close()
+        if conn:
+            conn.close()
         return []
 
+
 def fetch_projects_breakdown():
-    conn = get_db_connection(DB_PATH)
+    conn = config.connect_db()
     if not conn:
         return []
     try:
@@ -221,11 +204,13 @@ def fetch_projects_breakdown():
         return rows
     except Exception as e:
         print(f"Error running QUERY_PROJECTS_BREAKDOWN: {e}", file=sys.stderr)
-        if conn: conn.close()
+        if conn:
+            conn.close()
         return []
 
+
 def fetch_sessions_breakdown():
-    conn = get_db_connection(DB_PATH)
+    conn = config.connect_db()
     if not conn:
         return []
     try:
@@ -236,11 +221,13 @@ def fetch_sessions_breakdown():
         return rows
     except Exception as e:
         print(f"Error running QUERY_SESSIONS_BREAKDOWN: {e}", file=sys.stderr)
-        if conn: conn.close()
+        if conn:
+            conn.close()
         return []
 
+
 def fetch_tool_totals():
-    conn = get_db_connection(DB_PATH)
+    conn = config.connect_db()
     if not conn:
         return {}
     try:
@@ -248,7 +235,7 @@ def fetch_tool_totals():
         cursor.execute(QUERY_TOOL_TOTALS)
         rows = [dict(r) for r in cursor.fetchall()]
         conn.close()
-        
+
         tools_data = {}
         for r in rows:
             agent = r['agent']
@@ -259,7 +246,7 @@ def fetch_tool_totals():
                 "total": r['total'],
                 "requests": r['requests']
             }
-        
+
         # Merge Copilot
         cop_in, cop_out, cop_tot, cop_req = query_copilot_db()
         if 'copilot' not in tools_data:
@@ -268,15 +255,19 @@ def fetch_tool_totals():
         tools_data['copilot']['output'] += cop_out
         tools_data['copilot']['total'] += cop_tot
         tools_data['copilot']['requests'] += cop_req
-        
+
         return tools_data
     except Exception as e:
         print(f"Error running QUERY_TOOL_TOTALS: {e}", file=sys.stderr)
-        if conn: conn.close()
+        if conn:
+            conn.close()
         return {}
 
+
 def fetch_balance_observations():
-    conn = get_db_connection(DB_PATH)
+    """Latest per-metric balance observations from the native DB (populated by
+    legacy_sync from OpenUsage, or a future provider poller)."""
+    conn = config.connect_db()
     if not conn:
         return {}
     try:
@@ -298,5 +289,6 @@ def fetch_balance_observations():
         return latest_metrics
     except Exception as e:
         print(f"Error reading balance_observations: {e}", file=sys.stderr)
-        if conn: conn.close()
+        if conn:
+            conn.close()
         return {}

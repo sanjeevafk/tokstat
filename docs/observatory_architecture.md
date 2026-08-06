@@ -1,112 +1,133 @@
 # TokStat - Architecture & Technical Reference
 
-This document describes the modular architecture of **TokStat** (AI Engineering Telemetry Observatory & Token Tracker). It outlines the system topology, multi-source telemetry data pipelines, reconciliation logic, interactive visualization design, and CLI operations.
+This document describes the modular architecture of **TokStat** (AI Engineering
+Telemetry Observatory & Token Tracker). It outlines the system topology,
+multi-source telemetry data pipelines, reconciliation logic, interactive
+visualization design, and CLI operations.
+
+TokStat is **self-contained**: it collects telemetry itself via embedded
+scrapers and an HTTP ingestion server, stores everything in its own native
+database (`~/.tokstat/telemetry.db`), and works with zero external daemons.
+Legacy OpenUsage / tokentop databases are optional augmentary sources imported
+read-only.
 
 ---
 
 ## 1. System Topology & Component Architecture
 
-TokStat is designed with a modular architecture that enforces strict separation of concerns across database access, analytical computations, HTML dashboard rendering, multi-format exports, and CLI execution.
-
 ```mermaid
 graph TD
-    A["tokstat CLI (src/tokstat/cli.py)"] -->|CLI / Watch Mode| B["db_access.py"]
-    A -->|Coordinate| C["analytics.py"]
-    A -->|Trigger| D["renderer.py"]
-    A -->|Trigger| E["exporter.py"]
-    B -->|SQL Queries| F["queries.py"]
-    B -->|Fetch Snapshots| J["OpenUsage DB: balance_observations"]
-    B -->|Fetch Raw Events| K["OpenUsage DB: usage_events"]
-    B -->|Fetch Tokentop| L["Tokentop DB: usage_events"]
-    B -->|Fetch Copilot| M["Copilot DB: session-store.db"]
-    C -->|Git Metadata & Costs| G["utils.py"]
-    D -->|Generate HTML| H["openusage_dashboard.html"]
-    E -->|Write Formats| I["Exports Directory"]
+    A["tokstat CLI / daemon (cli.py / daemon.py)"] -->|bootstrap + collect| B["collectors/ package"]
+    C["IDE extensions / hooks / proxies"] -->|HTTP POST /v1/events| D["server.py (ingestion, 127.0.0.1)"]
+    E["Legacy OpenUsage + Tokentop DBs (optional)"] -->|read-only sync| B
+    B -->|WAL writes| F["Native DB ~/.tokstat/telemetry.db"]
+    D -->|batching writer| F
+    A -->|reads| F
+    A -->|aggregate| G["analytics.py"]
+    G -->|queries| H["db_access.py + queries.py"]
+    G -->|git metadata & costs| I["utils.py"]
+    A -->|render| J["renderer.py -> tokstat_dashboard.html"]
+    A -->|export| K["exporter.py"]
 ```
 
 ### Module Reference Matrix
 
 | Module | Location | Primary Responsibility |
 | :--- | :--- | :--- |
-| **`cli.py`** | [`src/tokstat/cli.py`](../src/tokstat/cli.py) | Main CLI entry point (`tokstat`). Supports standard HTML dashboard generation, `--watch` mode live-sync HTTP API server, and `--export` multi-format batch generation. |
-| **`db_access.py`** | [`src/tokstat/db_access.py`](../src/tokstat/db_access.py) | Database connection & ingestion layer. Connects to OpenUsage, Tokentop, and Copilot SQLite databases, performs time-bucket fingerprint deduplication, and reads provider balance snapshots. |
+| **`cli.py`** | [`src/tokstat/cli.py`](../src/tokstat/cli.py) | Main CLI entry point (`tokstat`): dashboard generation, `--watch` live-sync, `--export`, plus `migrate`, `collect --once`, and `daemon start\|stop\|status` subcommands. |
+| **`config.py`** | [`src/tokstat/config.py`](../src/tokstat/config.py) | Single source of truth for all paths (`~/.tokstat/`, legacy DB paths) and switches (`TOKSTAT_DIR`, `TOKSTAT_SYNC_LEGACY`). Provides the WAL-enabled `connect_db()`. |
+| **`migration.py`** | [`src/tokstat/migration.py`](../src/tokstat/migration.py) | Native schema bootstrap (`ensure_schema`) and read-only, idempotent importers for OpenUsage (`migrate_openusage`) and Tokentop (`migrate_tokentop`) with 10-second fingerprint cross-source dedup. |
+| **`collectors/`** | [`src/tokstat/collectors/`](../src/tokstat/collectors/) | Embedded scrapers: `legacy_sync` (optional augmentary), `claude_code` (real usage), `aider` (real), `gemini_antigravity` (estimated), `copilot` (estimated), `vscode_cursor` (spike). All extend `BaseCollector` and persist bookmarks in `collector_state`. |
+| **`server.py`** | [`src/tokstat/server.py`](../src/tokstat/server.py) | Stdlib HTTP ingestion server bound to `127.0.0.1`: `POST /v1/events` (single/batch), `POST /v1/telemetry` (alias), `GET /health`. A single batching writer thread (1s / 50 events) is the only DB writer. |
+| **`daemon.py`** | [`src/tokstat/daemon.py`](../src/tokstat/daemon.py) | Background daemon: PID file, SIGTERM/SIGINT graceful shutdown with queue drain, collector loop with backoff, ingestion server thread. |
+| **`db_access.py`** | [`src/tokstat/db_access.py`](../src/tokstat/db_access.py) | Database read layer for the native DB (events, daily rollup, projects, sessions, tool totals, balance observations) plus the legacy tokentop/copilot read helpers reused by collectors. |
 | **`queries.py`** | [`src/tokstat/queries.py`](../src/tokstat/queries.py) | Centralized repository of parameterized SQL queries (`QUERY_ALL_EVENTS`, `QUERY_DAILY_ROLLUP`, `QUERY_PROJECTS_BREAKDOWN`, `QUERY_SESSIONS_BREAKDOWN`, `QUERY_TOOL_TOTALS`). |
-| **`analytics.py`** | [`src/tokstat/analytics.py`](../src/tokstat/analytics.py) | Core analytical engine. Computes metrics aggregations, GitHub-style heatmaps, session durations, uninterrupted coding sprints, productivity ratios, and multi-source balance reconciliation. |
-| **`renderer.py`** | [`src/tokstat/renderer.py`](../src/tokstat/renderer.py) | Dashboard generator. Emits a self-contained, offline-capable HTML/CSS/JS file with Chart.js charts, interactive model highlighting, global search, and keyboard shortcuts. |
+| **`analytics.py`** | [`src/tokstat/analytics.py`](../src/tokstat/analytics.py) | Core analytical engine: metrics aggregations, GitHub-style heatmaps, session durations, uninterrupted coding sprints, productivity ratios, and balance reconciliation. |
+| **`renderer.py`** | [`src/tokstat/renderer.py`](../src/tokstat/renderer.py) | Dashboard generator emitting a self-contained, offline-capable HTML/CSS/JS file with Chart.js charts, interactive model highlighting, global search, and keyboard shortcuts. |
 | **`exporter.py`** | [`src/tokstat/exporter.py`](../src/tokstat/exporter.py) | Multi-format export engine producing PDF (via FPDF2), Markdown, JSON, and CSV reports. |
 | **`utils.py`** | [`src/tokstat/utils.py`](../src/tokstat/utils.py) | Utility functions for local Git repository commit scraping, usage-window commit correlation, and model cost/savings estimates. |
-| **`backfill_ide_data.py`** | [`src/tokstat/backfill_ide_data.py`](../src/tokstat/backfill_ide_data.py) | Ingest utility for historical IDE telemetry records backfill. |
 
 ---
 
 ## 2. Multi-Source Telemetry & Reconciliation Architecture
 
-TokStat aggregates telemetry events from multiple local developer environment databases:
-
 ```
-┌─────────────────────────────────────────┐
-│ OpenUsage Telemetry DB                  │
-│ (~/.local/state/openusage/telemetry.db) │
-└────────────────────┬────────────────────┘
-                     │
-          ┌──────────┴──────────┐
-          ▼                     ▼
-┌───────────────────┐ ┌────────────────────────┐  ┌──────────────────────────────────┐
-│ `usage_events`    │ │ `balance_observations` │  │ Tokentop DB                      │
-│ Granular requests │ │ Authoritative daemon   │  │ (~/.local/share/tokentop/...)    │
-│ event timelines   │ │ provider snapshots     │  └────────────────┬─────────────────┘
-└─────────┬─────────┘ └───────────┬────────────┘                   │
-          │                       │                                │
-          └───────────┬───────────┴────────────────────────────────┘
-                      │
-                      ▼
-┌──────────────────────────────────────────┐
-│ Copilot DB                               │
-│ (~/.copilot/session-store.db)            │
-└─────────────────────┬────────────────────┘
-                      │
-                      ▼
-┌──────────────────────────────────────────┐
-│ Analytics Reconciliation Engine          │
-│ (`tokstat.analytics.compute_analytics`)  │
-│ Total Reconciled Developer Token Economy │
-└──────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│  TokStat Autonomous Collection                                 │
+│  ┌─────────────┐ ┌────────────┐ ┌──────────────┐ ┌─────────┐  │
+│  │ claude_code │ │ aider      │ │ gemini_antig │ │ copilot │  │
+│  │ (real)      │ │ (real)     │ │ (estimated)  │ │ (est.)  │  │
+│  └─────────────┘ └────────────┘ └──────────────┘ └─────────┘  │
+│  + ingestion server (/v1/events)  + legacy_sync (read-only)   │
+└────────────────────────────────────────────────────────────────┘
+                              │ single batching writer
+                              ▼
+              Native DB  ~/.tokstat/telemetry.db (WAL)
+                 usage_events / usage_raw_events /
+                 balance_observations / collector_state
+                              │
+                              ▼
+        Analytics Reconciliation Engine (analytics.compute_analytics)
 ```
 
 ### Supported Data Sources
 
-1. **OpenUsage DB (`telemetry.db`)**:
-   - `usage_events`: Detailed request ledger tracking event timestamps (`occurred_at`), workspace IDs, session IDs, turn IDs, raw model strings, input/output/cache tokens, and tool names.
-   - `usage_raw_events`: Raw JSON payload buffer from IDE extensions and CLI tools.
-   - `balance_observations`: Periodically captured authoritative balance snapshots from background daemons logging cumulative provider usage metrics and per-model all-time totals.
-
-2. **Tokentop DB (`usage.db`)**:
-   - Evaluated and deduplicated against OpenUsage using a 10-second timestamp bucket fingerprint `(ts_bucket, model, input_tokens, output_tokens)`.
-
-3. **Copilot Session Store (`session-store.db`)**:
-   - Session store queried for Copilot message counts and token estimates.
+1. **Claude Code** (`~/.claude/projects/**/*.jsonl`): real token usage from
+   `message.usage` (input/output/cache). Streaming duplicates are merged by
+   `requestId`; `input_tokens` placeholders fall back to cache-creation counts.
+   `status='ok'`.
+2. **Aider** (`.aider.model.stats.json` in workspace roots): real per-model
+   token totals. `status='ok'`.
+3. **Gemini Antigravity** (brain `overview.txt`): real session/turn/timestamp
+   structure; token counts are deterministic content-length **estimates**,
+   flagged `status='estimated'`. Never fabricated.
+4. **GitHub Copilot** (`~/.copilot/session-store.db`): char-length heuristic
+   estimate, `status='estimated'`.
+5. **Cursor / VS Code** (`state.vscdb`): spike collector; usually a no-op (no
+   local usage keys). The ingestion endpoint is the supported path.
+6. **Custom hooks / proxies / IDE extensions**: `POST /v1/events` accepts
+   OpenUsage/OpenTelemetry-style payloads.
+7. **Legacy OpenUsage (`~/.local/state/openusage/telemetry.db`) and Tokentop
+   (`~/.local/share/tokentop/usage.db`)**: optional augmentary sources, read
+   read-only. Contribute migrated history and, from OpenUsage,
+   `balance_observations` (all-time provider totals).
 
 ### Reconciliation Strategy
 
-- **Local Events vs. Authoritative Snapshots**: Granular local event logs provide rich session timelines, repo correlation, and turn-by-turn prompt analysis. Authoritative daemon snapshots in `balance_observations` provide total all-time provider token totals (including cache reads and cost estimations).
-- **`analytics.compute_analytics()`**: Combines local event timelines with authoritative balance observations, ensuring dashboard top-level KPIs accurately reflect total usage while preserving detailed timeline breakdowns.
+- **Local events vs. authoritative snapshots**: granular local event logs
+  provide session timelines, repo correlation and turn-by-turn analysis.
+  Authoritative `balance_observations` snapshots (when present) provide
+  all-time provider totals. `analytics.compute_analytics()` combines both,
+  ensuring top-level KPIs reflect total usage while preserving detailed
+  breakdowns. Without balance observations (pure self-reliant mode) the
+  reconciliation degrades gracefully to event sums.
+- **Deduplication**: cross-source dedup uses a 10-second timestamp-bucket
+  fingerprint `(ts_bucket, model, input_tokens, output_tokens)`; per-source
+  dedup uses stable source-native keys (`tokentop-{id}`,
+  `claude-{requestId}`, `antigravity-ide-{session}-{step}`, `aider-...`).
 
 ---
 
 ## 3. Discovered Model & Tool Matrix
 
-TokStat normalizes raw model identifiers across AI CLI tools, IDE extensions, and API providers:
+TokStat normalizes raw model identifiers across AI CLI tools, IDE extensions,
+and API providers:
 
-- **Codex & OpenAI Models**: `gpt-5.2-codex`, `gpt-5.3-codex`, `gpt-5.4`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.1-codex-mini`, `gpt-5.2`.
-- **Google Gemini Models**: `gemini-3.5-flash`, `gemini-2.5-pro`, `gemini-3.1-pro-preview`.
-- **Anthropic Claude Models**: `claude-3.5-sonnet` (including Claude Code CLI requests issued under `claude_code`).
-- **IDE Assistants**: `composer-2.5`, `cursor-default`.
+- **Codex & OpenAI Models**: `gpt-5.2-codex`, `gpt-5.3-codex`, `gpt-5.4`,
+  `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.1-codex-mini`, `gpt-5.2`.
+- **Google Gemini Models**: `gemini-3.5-flash`, `gemini-2.5-pro`,
+  `gemini-3.1-pro-preview`.
+- **Anthropic Claude Models**: `claude-3.5-sonnet` (and later sonnet variants),
+  including Claude Code CLI requests issued under `claude_code`.
+- **IDE Assistants**: `composer-2.5`, `cursor-default`, `copilot-default`.
 
 ---
 
 ## 4. Interactive Visualization & UI Architecture
 
-The output dashboard (`openusage_dashboard.html`) is generated as a self-contained, single-file HTML application:
+The output dashboard (`tokstat_dashboard.html`; a backwards-compatible
+`openusage_dashboard.html` copy is also written) is a self-contained, single-file
+HTML application:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -129,13 +150,15 @@ The output dashboard (`openusage_dashboard.html`) is generated as a self-contain
 
 ### Key UI Features
 
-- **Interactive Model Filtering (`highlightOrFilterModel`)**: Clicking any model legend entry or chart slice dynamically filters all cards, tables, and charts to that model. Unselected slices dim to 25% opacity.
-- **Client-Side State Machine**: Manages filter dimensions (`project`, `model`, `tool`, `timeframe`) cleanly without full-page reloads.
-- **Keyboard Shortcuts**:
-  - `Ctrl + B`: Toggle sidebar collapse.
-  - `/`: Focus global search input.
-  - `Esc`: Clear all active filters and search terms.
-  - Number keys `1`–`8`: Switch view tabs.
+- **Interactive Model Filtering (`highlightOrFilterModel`)**: clicking any
+  model legend entry or chart slice filters all cards, tables and charts to
+  that model. Unselected slices dim to 25% opacity.
+- **Estimated-usage markers**: events with `status='estimated'` are surfaced so
+  measured vs. estimated numbers are always distinguishable.
+- **Client-Side State Machine**: manages filter dimensions (`project`,
+  `model`, `tool`, `timeframe`) without full-page reloads.
+- **Keyboard Shortcuts**: `Ctrl+B` toggle sidebar, `/` focus search, `Esc`
+  clear filters, `1`–`8` switch view tabs.
 
 ---
 
@@ -145,25 +168,75 @@ The output dashboard (`openusage_dashboard.html`) is generated as a self-contain
 ```bash
 tokstat
 ```
-Generates a self-contained HTML report (`openusage_dashboard.html`).
+The bare command runs the full idempotent pipeline:
+
+1. **Bootstrap** `~/.tokstat/telemetry.db` (schema + optional read-only legacy
+   import via `migration.check_and_run_migrations`).
+2. **Gather** usage from every local source (`run_collectors_once`; collectors
+   are individually fault-tolerant so one broken source can't block the rest).
+3. **Render** `tokstat_dashboard.html` and **open it** in the browser.
+
+Flags: `tokstat --no-collect` (render only), `tokstat --no-open` (skip the
+browser). The same flow is available as `make run`.
+
+### Makefile Workflows
+```bash
+make help            # list all targets
+make dev             # editable install with dev deps
+make run             # gather + render + open (same as bare `tokstat`)
+make test / make lint / make check
+make build           # sdist + wheel into dist/
+make release-check   # build + twine check
+make clean
+```
+
+### Legacy Migration
+```bash
+tokstat migrate            # read-only import of OpenUsage + Tokentop history
+tokstat migrate --force    # re-run (idempotent)
+```
+
+### Collectors
+```bash
+tokstat collect --once     # run all embedded scrapers once
+```
+
+### Background Daemon
+```bash
+tokstat daemon start       # collectors + ingestion server on 127.0.0.1:5000
+tokstat daemon status
+tokstat daemon stop
+```
 
 ### Live Sync Watch Mode
 ```bash
 tokstat --watch --port 5000
 ```
-Launches a lightweight local API server (`TelemetryHandler`) serving live JSON updates at `http://localhost:5000/data`. Re-renders the dashboard automatically when `telemetry.db` changes.
+Launches a localhost API server (`TelemetryHandler`) serving live JSON updates
+at `http://127.0.0.1:5000/data`; regenerates the dashboard when the native DB
+changes.
+
+### Ingestion Endpoint (for hooks / extensions)
+```bash
+curl -s -X POST http://127.0.0.1:5000/v1/events -H 'Content-Type: application/json' \
+  -d '{"agent_name":"my-tool","event_type":"message_usage","occurred_at":"2026-08-06T12:00:00Z","model_raw":"gpt-4o-mini","input_tokens":10,"output_tokens":5}'
+curl -s http://127.0.0.1:5000/health
+```
 
 ### Automated Multi-Format Export
 ```bash
 tokstat --export ./reports
 ```
-Generates `observatory_report.json`, `observatory_report.md`, `observatory_report.pdf`, CSV datasets, and a copy of `observatory_dashboard.html` in `./reports`.
+Generates `observatory_report.json`, `observatory_report.md`,
+`observatory_report.pdf`, CSV datasets, and a copy of
+`observatory_dashboard.html` in `./reports`.
 
 ---
 
 ## 6. Testing & Quality Assurance
 
-Unit and integration tests verify reconciliation logic, queries, and analytics calculation integrity:
+Unit and integration tests verify migration, collectors, ingestion, and
+analytics calculation integrity:
 
 ```bash
 # Run test suite
@@ -172,3 +245,8 @@ pytest
 # Run code linter
 ruff check .
 ```
+
+Test files: `tests/test_config.py`, `tests/test_migration.py`,
+`tests/test_collectors.py`, `tests/test_server.py`, plus the existing
+analytics/renderer/feedback tests. CI (GitHub Actions) runs ruff + pytest on
+Python 3.9–3.12.

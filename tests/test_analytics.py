@@ -133,6 +133,43 @@ class TestAnalyticsUnit(unittest.TestCase):
             self.assertEqual(go.get("cached_tokens"), 1500)
             self.assertEqual(len(report.get("repositories", [])), 1)
             self.assertEqual(len(report.get("sessions", [])), 1)
+    def test_client_events_savings_match_estimated_savings(self):
+        # The dashboard KPI/table savings must equal the exported estimate so the
+        # two never silently diverge (regression for the cache-savings fix).
+        mock_events = [
+            {
+                "event_id": "ev-1", "occurred_at": "2026-07-26T10:00:00Z",
+                "workspace_id": "test-repo", "session_id": "sess-1", "turn_id": "1",
+                "model_raw": "gpt-4o", "agent_name": "claude_code",
+                "input_tokens": 1000, "output_tokens": 200, "cache_read_tokens": 500,
+                "total_tokens": 1700, "requests": 1, "status": "ok",
+            },
+            {
+                "event_id": "ev-2", "occurred_at": "2026-07-26T10:05:00Z",
+                "workspace_id": "test-repo", "session_id": "sess-1", "turn_id": "2",
+                "model_raw": "gpt-4o", "agent_name": "claude_code",
+                "input_tokens": 2000, "output_tokens": 400, "cache_read_tokens": 1000,
+                "total_tokens": 3400, "requests": 1, "status": "ok",
+            },
+        ]
+        with patch.object(db_access, "fetch_all_events", return_value=mock_events), \
+             patch.object(db_access, "query_copilot_db", return_value=(0, 0, 0, 0)), \
+             patch.object(db_access, "fetch_balance_observations", return_value={}):
+            report = analytics.compute_analytics()
+
+        go = report["global_overview"]
+        for ev in report["events"]:
+            self.assertIn("savings", ev)
+            self.assertAlmostEqual(
+                ev["savings"],
+                utils.estimate_token_cost_and_savings(
+                    ev["model"], ev["input"], ev["output"], ev["cache_read"]
+                )[1],
+                places=9,
+            )
+        self.assertAlmostEqual(
+            sum(ev["savings"] for ev in report["events"]), go["estimated_savings"], places=9
+        )
 
 
 if __name__ == "__main__":
