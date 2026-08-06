@@ -23,7 +23,7 @@ class TokenTrackerPDF(fpdf.FPDF):
         self.cell(0, 10, 'AI Engineering Observatory - Telemetry Report', border=0, ln=1, align='L')
         self.set_font('Helvetica', 'I', 9)
         self.set_text_color(100, 110, 130)
-        self.cell(0, 5, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | OpenUsage Telemetry', border=0, ln=1, align='L')
+        self.cell(0, 5, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | TokStat Telemetry', border=0, ln=1, align='L')
         self.line(10, 26, 200, 26)
         self.ln(6)
 
