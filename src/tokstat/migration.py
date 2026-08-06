@@ -1,9 +1,9 @@
 # migration.py
 """Native schema bootstrap and read-only migration of legacy databases.
 
-The native schema is OpenUsage-compatible (see docs/openusage_independence_plan.md
-section 3.1) so analytics/queries/renderer keep working unchanged. Migration is
-idempotent, non-destructive (legacy DBs are opened read-only) and deduplicated.
+The native schema is OpenUsage-compatible so analytics/queries/renderer keep
+working unchanged. Migration is idempotent, non-destructive (legacy DBs are
+opened read-only) and deduplicated.
 """
 import datetime
 import os
