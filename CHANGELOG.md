@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Makefile** — `make run/test/lint/check/build/release-check/publish/...`
   developer and release workflows.
 - `ACKNOWLEDGEMENTS.md`, `CHANGELOG.md`, rewritten README and architecture
-  docs (including the autonomy implementation plan).
+  docs.
 
 ### Changed
 
