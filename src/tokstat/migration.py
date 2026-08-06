@@ -10,6 +10,7 @@ import os
 import re
 import sqlite3
 import sys
+from typing import Optional
 
 from . import config
 
@@ -129,7 +130,7 @@ def _record_migration(conn: sqlite3.Connection, migration_id: str) -> None:
     )
 
 
-def _open_legacy_readonly(path: str) -> sqlite3.Connection | None:
+def _open_legacy_readonly(path: str) -> Optional[sqlite3.Connection]:
     """Open a legacy SQLite database strictly read-only; None if unusable."""
     if not os.path.exists(path):
         return None

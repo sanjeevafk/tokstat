@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Optional
 
 from . import config
 from .collectors.base import EVENT_COLUMNS
@@ -25,7 +26,7 @@ from .collectors.base import EVENT_COLUMNS
 BATCH_FLUSH_INTERVAL_SEC = 1.0
 
 
-def normalize_event(raw) -> tuple[dict | None, str | None]:
+def normalize_event(raw) -> tuple[Optional[dict], Optional[str]]:
     """Normalize a raw wire payload into a usage_events row.
 
     Returns (event, None) on success or (None, error_message).
@@ -165,7 +166,7 @@ class TelemetryIngestHandler(BaseHTTPRequestHandler):
 class IngestionServer:
     """Runs the HTTP server plus the single batching writer thread."""
 
-    def __init__(self, host: str | None = None, port: int | None = None):
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
         self.host = host or config.SERVER_HOST
         self.port = port or config.SERVER_PORT
         self.ingestion_queue: queue.Queue = queue.Queue()
@@ -247,7 +248,7 @@ class IngestionServer:
             conn.close()
 
 
-def run_server_blocking(host: str | None = None, port: int | None = None) -> None:
+def run_server_blocking(host: Optional[str] = None, port: Optional[int] = None) -> None:
     """Run the ingestion server in the foreground (used by the daemon)."""
     srv = IngestionServer(host=host, port=port)
     srv.start()

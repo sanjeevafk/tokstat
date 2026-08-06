@@ -10,6 +10,7 @@ Environment overrides:
 """
 import os
 import sqlite3
+from typing import Optional
 
 # --- Data directory & native database -------------------------------------
 TOKSTAT_DIR = os.environ.get("TOKSTAT_DIR") or os.path.expanduser("~/.tokstat")
@@ -52,7 +53,7 @@ def ensure_tokstat_dir() -> None:
     os.makedirs(TOKSTAT_DIR, exist_ok=True)
 
 
-def connect_db(path: str | None = None) -> sqlite3.Connection:
+def connect_db(path: Optional[str] = None) -> sqlite3.Connection:
     """Open (creating if needed) the native TokStat database.
 
     Enables WAL mode, a 5s busy timeout and NORMAL synchronous for safe

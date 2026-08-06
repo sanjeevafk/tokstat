@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Optional
 
 from . import config, server
 from .collectors import get_collectors, run_collectors_once
@@ -33,7 +34,7 @@ def _setup_logging() -> None:
     )
 
 
-def read_pid() -> int | None:
+def read_pid() -> Optional[int]:
     try:
         with open(config.DAEMON_PID_PATH, "r") as f:
             return int(f.read().strip())
@@ -41,7 +42,7 @@ def read_pid() -> int | None:
         return None
 
 
-def is_running() -> int | None:
+def is_running() -> Optional[int]:
     pid = read_pid()
     if pid is None:
         return None
@@ -52,7 +53,7 @@ def is_running() -> int | None:
         return None
 
 
-def _pid_uptime(pid: int) -> int | None:
+def _pid_uptime(pid: int) -> Optional[int]:
     try:
         with open(f"/proc/{pid}/stat", "r") as f:
             fields = f.read().split()
