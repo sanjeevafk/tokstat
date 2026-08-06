@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tokstat"
-version = "0.1.0"
+name = "tokstat-observatory"
+version = "0.2.0"
 description = "AI Developer Telemetry Observatory & Token Tracker"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,6 +12,7 @@ license = "MIT"
 authors = [
     { name = "sanjeevafk" }
 ]
+
 keywords = ["ai", "telemetry", "tokens", "observability", "dashboard", "developer-tools"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -27,6 +28,10 @@ classifiers = [
 dependencies = [
     "fpdf2>=2.7.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/sanjeevafk/tokstat"
+Documentation = "https://github.com/sanjeevafk/tokstat/blob/main/docs/observatory_architecture.md"
 
 [project.optional-dependencies]
 dev = [
