@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 
-from tokstat import analytics, db_access, utils
+from tokstat import analytics, config, db_access, utils
 
 
 class TestAnalyticsUnit(unittest.TestCase):
@@ -62,6 +62,40 @@ class TestAnalyticsUnit(unittest.TestCase):
         self.assertGreater(cost, 0.0)
         self.assertGreater(savings, 0.0)
 
+    def test_local_provider_is_zero_cost(self):
+        cost, savings = utils.estimate_token_cost_and_savings(
+            "llama3.1:8b", 1_000_000, 1_000_000, 500_000, provider_id="local"
+        )
+        self.assertEqual(cost, 0.0)
+        self.assertEqual(savings, 0.0)
+
+    def test_cloud_equivalent_cost_maps_local_models(self):
+        cloud, cost = utils.estimate_cloud_equivalent_cost("llama3.1:70b", 1_000_000, 500_000)
+        self.assertEqual(cloud, "gpt-4o")
+        self.assertGreater(cost, 0.0)
+        # 1M in @ $5 + 0.5M out @ $15 = $5 + $7.5 = $12.5
+        self.assertAlmostEqual(cost, 12.5, places=4)
+
+        cloud_none, cost_none = utils.estimate_cloud_equivalent_cost("some-unknown-model", 10, 10)
+        self.assertIsNone(cloud_none)
+        self.assertEqual(cost_none, 0.0)
+
+    def test_codellama_not_matched_as_llama(self):
+        # "codellama" must match the specific entry before the generic "llama"
+        # fragment, otherwise it would be priced as gpt-4o instead of gpt-3.5.
+        cloud, cost = utils.estimate_cloud_equivalent_cost("codellama:34b", 1_000_000, 1_000_000)
+        self.assertEqual(cloud, "gpt-3.5")
+        # 1M in @ $0.50 + 1M out @ $1.50 = $2.0
+        self.assertAlmostEqual(cost, 2.0, places=4)
+        # Plain llama still maps to gpt-4o
+        cloud_llama, _ = utils.estimate_cloud_equivalent_cost("llama3.1:70b", 100, 100)
+        self.assertEqual(cloud_llama, "gpt-4o")
+
+    def test_pricing_overrides_beat_builtin_map(self):
+        with patch.object(config, "pricing_overrides", return_value={"llama*": [0.0, 0.0]}):
+            _cloud, cost = utils.estimate_cloud_equivalent_cost("llama3.1:8b", 1_000_000, 1_000_000)
+        self.assertEqual(cost, 0.0)
+
         # Test specific models
         cost_flash, _ = utils.estimate_token_cost_and_savings("gemini-3.5-flash", 1000000, 1000000, 0)
         cost_opus, _ = utils.estimate_token_cost_and_savings("claude-3-opus", 1000000, 1000000, 0)
@@ -87,6 +121,55 @@ class TestAnalyticsUnit(unittest.TestCase):
         with patch.object(db_access, "fetch_all_events", return_value=[]):
             data = analytics.compute_analytics()
             self.assertEqual(data, {})
+
+    def test_local_inference_summary_in_global_overview(self):
+        mock_events = [
+            {
+                "event_id": "ev-1", "occurred_at": "2026-07-26T10:00:00Z",
+                "workspace_id": "test-repo", "session_id": "sess-1", "turn_id": "1",
+                "model_raw": "llama3.1:8b", "agent_name": "ollama_proxy",
+                "provider_id": "local",
+                "input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 0,
+                "total_tokens": 1500, "requests": 1, "status": "ok",
+            },
+            {
+                "event_id": "ev-2", "occurred_at": "2026-07-26T10:05:00Z",
+                "workspace_id": "test-repo", "session_id": "sess-1", "turn_id": "2",
+                "model_raw": "qwen2.5-coder", "agent_name": "ollama_proxy",
+                "provider_id": "local",
+                "input_tokens": 2000, "output_tokens": 1000, "cache_read_tokens": 0,
+                "total_tokens": 3000, "requests": 1, "status": "ok",
+            },
+            {
+                "event_id": "ev-3", "occurred_at": "2026-07-26T10:10:00Z",
+                "workspace_id": "test-repo", "session_id": "sess-1", "turn_id": "3",
+                "model_raw": "gpt-4o", "agent_name": "claude_code",
+                "provider_id": "anthropic",
+                "input_tokens": 1000, "output_tokens": 200, "cache_read_tokens": 500,
+                "total_tokens": 1700, "requests": 1, "status": "ok",
+            },
+        ]
+        with patch.object(db_access, "fetch_all_events", return_value=mock_events), \
+             patch.object(db_access, "query_copilot_db", return_value=(0, 0, 0, 0)), \
+             patch.object(db_access, "fetch_balance_observations", return_value={}):
+            report = analytics.compute_analytics()
+
+        li = report["global_overview"]["local_inference"]
+        self.assertEqual(li["total_tokens"], 4500)
+        self.assertEqual(li["total_events"], 2)
+        self.assertEqual(li["requests"], 2)
+        self.assertGreater(li["cloud_cost_avoidance"], 0.0)
+        self.assertIn("llama3.1:8b", li["models_used"])
+        # Cloud events are excluded from local inference and keep their cost
+        self.assertGreater(report["global_overview"]["estimated_cost"], 0.0)
+        # Client events carry provider + cloud_avoidance for the dashboard filter
+        local_client = [e for e in report["events"] if e["provider"] == "local"]
+        self.assertEqual(len(local_client), 2)
+        self.assertTrue(all(e["cloud_avoidance"] > 0.0 for e in local_client))
+        self.assertEqual(
+            [e for e in report["events"] if e["provider"] != "local"][0]["cloud_avoidance"],
+            0.0,
+        )
 
     def test_analytics_computation_with_mock_events(self):
         mock_events = [

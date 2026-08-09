@@ -1,7 +1,62 @@
 # utils.py
+import fnmatch
 import os
 import re
 import subprocess
+
+from . import config
+
+# Local model name fragment -> closest cloud equivalent (model, $/1M in, $/1M out).
+# Used only for the "cloud cost avoidance" estimate; local inference itself is
+# always billed $0.00. Users can override via [pricing.overrides] in config.toml.
+LOCAL_TO_CLOUD_MAP = {
+    # NOTE: dict order is match order (substring test). "codellama" must come
+    # before "llama" or Codellama models would match the broader fragment and
+    # get priced as gpt-4o. Keep more specific fragments ahead of generic ones.
+    "codellama": ("gpt-3.5", 0.50, 1.50),
+    "llama": ("gpt-4o", 5.0, 15.0),
+    "qwen": ("gpt-4o-mini", 0.15, 0.60),
+    "deepseek": ("claude-3.5-sonnet", 3.0, 15.0),
+    "mistral": ("gpt-4o-mini", 0.15, 0.60),
+    "phi": ("gpt-4o-mini", 0.15, 0.60),
+}
+
+
+def estimate_cloud_equivalent_cost(model_raw, input_tokens, output_tokens, cache_read_tokens=0):
+    """Estimate what a local-model run would have cost through a cloud API.
+
+    Returns (closest_cloud_model_name or None, cost_usd). User pricing
+    overrides from config.toml ([pricing.overrides] glob patterns) win over
+    the built-in LOCAL_TO_CLOUD_MAP. cache_read_tokens are priced at the
+    input rate with a 90% cache discount, mirroring cloud caching.
+    """
+    m = str(model_raw or "").lower()
+    cloud_model = None
+    in_rate = out_rate = 0.0
+    for pattern, (name, i_rate, o_rate) in LOCAL_TO_CLOUD_MAP.items():
+        if pattern in m:
+            cloud_model, in_rate, out_rate = name, i_rate, o_rate
+            break
+    if cloud_model is None:
+        return None, 0.0
+
+    for pat, rates in config.pricing_overrides().items():
+        if fnmatch.fnmatch(m, str(pat).lower()):
+            try:
+                in_rate, out_rate = float(rates[0]), float(rates[1])
+            except (TypeError, ValueError, IndexError):
+                pass
+            break
+
+    inp = input_tokens or 0
+    out = output_tokens or 0
+    cread = cache_read_tokens or 0
+    cost = (
+        inp * in_rate / 1_000_000.0
+        + out * out_rate / 1_000_000.0
+        + cread * in_rate * 0.10 / 1_000_000.0
+    )
+    return cloud_model, cost
 
 
 def normalize_model_display_name(raw):
@@ -88,11 +143,18 @@ def get_git_metadata(repo_path, max_commits=200):
     except Exception:
         return None
 
-def estimate_token_cost_and_savings(model_raw, input_tokens, output_tokens, cache_read_tokens):
+def estimate_token_cost_and_savings(model_raw, input_tokens, output_tokens, cache_read_tokens, provider_id=None):
     """
     Estimates the retail API cost and cached savings in USD.
     Based on standard pricing per 1M tokens.
+
+    provider_id="local" is always zero-cost: local inference has no API bill,
+    so it must never be charged fabricated cloud pricing (see
+    docs/local_model_support_plan.md).
     """
+    if provider_id == "local":
+        return 0.0, 0.0
+
     # Fallback default pricing
     in_rate = 2.0 / 1000000.0
     out_rate = 6.0 / 1000000.0
