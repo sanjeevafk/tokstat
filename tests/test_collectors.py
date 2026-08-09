@@ -149,11 +149,6 @@ class TestGeminiAntigravityCollector(unittest.TestCase):
     # --- Bug 1 & 2: settings.json fallback + regex captures full version number ---
     def test_settings_json_fallback_no_change_tag(self):
         """When no USER_SETTINGS_CHANGE is present, model comes from settings.json."""
-        brain = self._make_brain("sess-settings")
-        # Write a settings.json one level up from the fake brain dir
-        settings_dir = os.path.join(config.TOKSTAT_DIR, "brain", "sess-settings")
-        settings_path = os.path.join(settings_dir, "..", "..", "settings.json")
-        # Use a proper parent path matching what _load_settings_model expects
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             fake_brain_dir = os.path.join(tmp, "antigravity-cli", "brain")
