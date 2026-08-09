@@ -556,7 +556,11 @@ def maybe_sync(conn=None, force: bool = False):
                     last = None
             if last:
                 try:
-                    last_dt = datetime.datetime.fromisoformat(last)
+                    # now_iso() stamps "...Z"; datetime.fromisoformat only
+                    # understands "Z" from Python 3.11, so normalize first to
+                    # keep the interval guard correct on Python 3.9/3.10.
+                    last_iso = last[:-1] + "+00:00" if last.endswith("Z") else last
+                    last_dt = datetime.datetime.fromisoformat(last_iso)
                     if last_dt.tzinfo is None:
                         last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
                     elapsed_h = (

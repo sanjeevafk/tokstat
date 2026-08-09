@@ -446,12 +446,19 @@ class TestSyncWriteAndReconcile(unittest.TestCase):
                 (sync._SYNC_STATE_ID, json.dumps({"last_sync_at": now_iso()}), now_iso()),
             )
             conn.commit()
+            # Drive maybe_sync on the SAME connection: SQLite guarantees a
+            # connection sees its own committed writes, so the interval guard is
+            # tested deterministically instead of racing cross-connection WAL
+            # visibility on a fresh database.
+            with patch.object(sync, "run_sync_once", return_value={"exit_code": 0}):
+                self.assertIsNone(sync.maybe_sync(conn=conn))  # not due yet
+                res = sync.maybe_sync(force=True, conn=conn)   # forced runs anyway
+            self.assertEqual(res["exit_code"], 0)
+            # Leave a pristine state table for the sibling "runs when due" test.
+            conn.execute("DELETE FROM collector_state WHERE collector_id = ?", (sync._SYNC_STATE_ID,))
+            conn.commit()
         finally:
             conn.close()
-        with patch.object(sync, "run_sync_once", return_value={"exit_code": 0}):
-            self.assertIsNone(sync.maybe_sync())  # not due yet
-            res = sync.maybe_sync(force=True)     # forced runs anyway
-        self.assertEqual(res["exit_code"], 0)
 
     def test_maybe_sync_runs_when_due(self):
         with patch.object(sync, "run_sync_once", return_value={"exit_code": 0}):
