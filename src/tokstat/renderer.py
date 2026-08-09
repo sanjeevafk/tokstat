@@ -1172,6 +1172,14 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <span>Tool Analytics</span>
                 </a>
             </li>
+            <li class="nav-item" id="nav-providers" onclick="switchTab('providers')">
+                <a>
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                    </svg>
+                    <span>Providers</span>
+                </a>
+            </li>
             <li class="nav-item" id="nav-time" onclick="switchTab('time')">
                 <a>
                     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1286,7 +1294,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         <strong>Two lenses, one telemetry picture</strong>
                         <span>Provider totals are cumulative; detailed tables use locally observed request events.</span>
                     </div>
-                    <div class="scope-stat"><small>PROVIDER REPORTED</small><b>__SCOPE_PROVIDER__</b></div>
+                    <div class="scope-stat" style="cursor:pointer;" title="Drill into provider-reported cloud usage" onclick="drilldownProvider('cloud')"><small>PROVIDER REPORTED</small><b>__SCOPE_PROVIDER__</b></div>
                     <div class="scope-stat"><small>LOCAL EVENT LOG</small><b>__SCOPE_EVENTS__</b></div>
                     <div class="scope-stat scope-gap"><small>NOT IN EVENT LOG</small><b>__SCOPE_GAP__</b></div>
                     <div class="scope-hint" id="scope-gap-hint" style="__SCOPE_HINT_STYLE__">
@@ -1746,6 +1754,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                             <thead>
                                 <tr>
                                     <th>Model Name</th>
+                                    <th>Provider</th>
                                     <th style="text-align: right;">Total Tokens</th>
                                     <th style="text-align: right;">Requests</th>
                                     <th style="text-align: right;">Avg Context (In)</th>
@@ -1800,6 +1809,131 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                                 <!-- Populated by JS -->
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= VIEW: PROVIDERS ================= -->
+            <div id="view-providers" class="tab-view">
+                <!-- Providers list -->
+                <div id="subview-providers-list" class="detail-view-container">
+                    <div class="panel-card">
+                        <div class="panel-header">
+                            <div>
+                                <h2 class="panel-title">Provider Telemetry</h2>
+                                <p class="panel-subtitle">Token and cost breakdown by provider, computed from the locally observed event log</p>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table id="providers-table">
+                                <thead>
+                                    <tr>
+                                        <th onclick="sortProvidersTable('provider')">Provider</th>
+                                        <th onclick="sortProvidersTable('type')">Type</th>
+                                        <th style="text-align: right;" onclick="sortProvidersTable('tokens')">Total Tokens</th>
+                                        <th style="text-align: right;" onclick="sortProvidersTable('requests')">Requests</th>
+                                        <th style="text-align: right;" onclick="sortProvidersTable('sessions')">Sessions</th>
+                                        <th style="text-align: right;" onclick="sortProvidersTable('cost')">Estimated Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="providers-table-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Provider Drilldown sub-view -->
+                <div id="subview-provider-drilldown" class="detail-view-container" style="display: none;">
+                    <div class="detail-header-row">
+                        <div>
+                            <h2 class="panel-title" id="provider-drilldown-title">Provider: Local Inference</h2>
+                            <p class="panel-subtitle" id="provider-drilldown-meta">Events · Sessions · Repos</p>
+                        </div>
+                        <button class="back-btn" onclick="exitProviderDrilldown()">
+                            &larr; Back to Providers
+                        </button>
+                    </div>
+
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-header"><span>Total Tokens</span></div>
+                            <div class="metric-value" id="provider-drill-tokens">0</div>
+                            <div class="metric-footer"><span>In / Out: <span id="provider-drill-io">0/0</span></span></div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-header"><span>Estimated Cost</span></div>
+                            <div class="metric-value text-orange" id="provider-drill-cost">$0.00</div>
+                            <div class="metric-footer"><span>Requests: <span id="provider-drill-requests">0</span></span></div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-header"><span>Sessions</span></div>
+                            <div class="metric-value text-emerald" id="provider-drill-sessions">0</div>
+                            <div class="metric-footer"><span>Unique coding sessions</span></div>
+                        </div>
+                        <div class="metric-card" id="provider-drill-avoidance-card">
+                            <div class="metric-header"><span>Cloud Cost Avoidance</span></div>
+                            <div class="metric-value text-emerald" id="provider-drill-avoidance">$0.0000</div>
+                            <div class="metric-footer"><span>Local inference savings</span></div>
+                        </div>
+                    </div>
+
+                    <div class="panel-card" id="provider-drill-chips-panel">
+                        <div class="panel-header">
+                            <h2 class="panel-title">Provider Breakdown</h2>
+                        </div>
+                        <div id="provider-drill-chips" style="display:flex; flex-wrap:wrap; gap:.5rem;"></div>
+                    </div>
+
+                    <div class="two-col-grid">
+                        <div class="panel-card">
+                            <div class="panel-header">
+                                <h2 class="panel-title">Models & Tools</h2>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                                <div>
+                                    <h3 style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase;">Top Models</h3>
+                                    <div id="provider-drill-models-list" style="display: flex; flex-direction: column; gap: 0.4rem;"></div>
+                                </div>
+                                <div>
+                                    <h3 style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase;">Top Coding Tools</h3>
+                                    <div id="provider-drill-tools-list" style="display: flex; flex-direction: column; gap: 0.4rem;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-card">
+                            <div class="panel-header">
+                                <h2 class="panel-title">Top Repositories</h2>
+                            </div>
+                            <div id="provider-drill-repos-list" style="display: flex; flex-direction: column; gap: 0.4rem;"></div>
+                        </div>
+                    </div>
+
+                    <div class="panel-card">
+                        <div class="panel-header">
+                            <div>
+                                <h2 class="panel-title">Recent Events</h2>
+                                <p class="panel-subtitle">Latest requests observed for this provider</p>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Tool</th>
+                                        <th>Model</th>
+                                        <th>Repository</th>
+                                        <th style="text-align: right;">In / Out</th>
+                                        <th style="text-align: right;">Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="provider-drill-events-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2065,6 +2199,9 @@ def generate_html_report(report_data, output_path, watch_mode=False):
         let currentTab = 'overview';
         let repoDrillId = null;
         let sessionDrillId = null;
+        let providerDrillId = null;
+        let providerSortCol = 'tokens';
+        let providerSortDesc = true;
         
         // Sorting states
         let repoSortCol = 'tokens';
@@ -2261,8 +2398,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 }
                 // Switch tabs with numbers 1 to 7
                 if (!e.ctrlKey && !e.altKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') {
-                    const numKeys = ['1', '2', '3', '4', '5', '6', '7', '8'];
-                    const tabs = ['overview', 'repositories', 'sessions', 'models', 'tools', 'time', 'git', 'export'];
+                    const numKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+                    const tabs = ['overview', 'repositories', 'sessions', 'models', 'tools', 'providers', 'time', 'git', 'export'];
                     const idx = numKeys.indexOf(e.key);
                     if (idx !== -1) {
                         switchTab(tabs[idx]);
@@ -2293,10 +2430,13 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             if (!preserveDrilldown) {
                 repoDrillId = null;
                 sessionDrillId = null;
+                providerDrillId = null;
                 document.getElementById('subview-repos-list').style.display = 'block';
                 document.getElementById('subview-repo-drilldown').style.display = 'none';
                 document.getElementById('subview-sessions-list').style.display = 'block';
                 document.getElementById('subview-session-drilldown').style.display = 'none';
+                document.getElementById('subview-providers-list').style.display = 'block';
+                document.getElementById('subview-provider-drilldown').style.display = 'none';
             }
 
             // Update breadcrumb
@@ -2331,6 +2471,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 text = `<span style="cursor:pointer;" onclick="exitRepoDrilldown()">Observatory &gt; Repositories</span> &gt; <span class="current">${escapeHtml(repoDrillId)}</span>`;
             } else if (sessionDrillId) {
                 text = `<span style="cursor:pointer;" onclick="exitSessionDrilldown()">Observatory &gt; Sessions</span> &gt; <span class="current">Session: ${escapeHtml(sessionDrillId.slice(0, 8))}</span>`;
+            } else if (providerDrillId) {
+                text = `<span style="cursor:pointer;" onclick="exitProviderDrilldown()">Observatory &gt; Providers</span> &gt; <span class="current">${escapeHtml(providerDisplayName(providerDrillId))}</span>`;
             }
             breadcrumbTrail.innerHTML = text;
         }
@@ -2340,6 +2482,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             activeFilters.project = document.getElementById('filter-project').value;
             activeFilters.model = document.getElementById('filter-model').value;
             activeFilters.tool = document.getElementById('filter-tool').value;
+            const provVal = document.getElementById('filter-provider').value;
+            activeFilters.provider = ['all', 'cloud', 'local'].includes(provVal) ? provVal : 'all';
             
             localStorage.setItem('obs_filters', JSON.stringify(activeFilters));
             renderUI();
@@ -2380,11 +2524,13 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 project: 'all',
                 model: 'all',
                 tool: 'all',
+                provider: 'all',
                 timeframe: 'all'
             };
             document.getElementById('filter-project').value = 'all';
             document.getElementById('filter-model').value = 'all';
             document.getElementById('filter-tool').value = 'all';
+            document.getElementById('filter-provider').value = 'all';
             document.getElementById('global-search-input').value = '';
             setDateBtnActive('all');
             
@@ -2478,6 +2624,12 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 renderModels();
             } else if (currentTab === 'tools') {
                 renderTools();
+            } else if (currentTab === 'providers') {
+                if (providerDrillId) {
+                    renderProviderDrilldown(providerDrillId);
+                } else {
+                    renderProvidersList();
+                }
             } else if (currentTab === 'time') {
                 renderTimeAnalytics();
             } else if (currentTab === 'git') {
@@ -2488,12 +2640,289 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             }
         }
 
+        // ================= PROVIDERS RENDERING =================
+        const PROVIDER_DISPLAY = {
+            'local': 'Local Inference',
+            'cloud': 'Cloud Services',
+            'anthropic': 'Anthropic Claude',
+            'openai': 'OpenAI API',
+            'codex': 'OpenAI Codex',
+            'google': 'Google Gemini',
+            'github': 'GitHub Copilot',
+            'ollama': 'Ollama (Local)',
+            'llamacpp': 'llama.cpp (Local)',
+            'vllm': 'vLLM (Local/Remote)',
+            'unknown': 'Unknown / Other'
+        };
+
+        function providerDisplayName(p) {
+            return PROVIDER_DISPLAY[p] || ((p || 'unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+        }
+
+        function providerChipClass(p) {
+            const t = p || 'unknown';
+            if (t === 'local' || t === 'ollama' || t === 'llamacpp' || t === 'vllm') return 'pill-emerald';
+            if (t === 'anthropic') return 'pill-purple';
+            if (t === 'google') return 'pill-cyan';
+            if (t === 'github') return 'pill-blue';
+            return 'pill-orange';
+        }
+
+        function eventMatchesProvider(ev, drill) {
+            const p = ev.provider || 'unknown';
+            if (drill === 'cloud') return p !== 'local';
+            if (drill === 'local') return p === 'local';
+            return p === drill;
+        }
+
+        function drilldownProvider(p) {
+            providerDrillId = p;
+            // The drilldown itself is the provider filter, so stop the dropdown
+            // from double-filtering the event set (e.g. dropdown=Local while
+            // clicking the Cloud donut segment would otherwise show an empty view).
+            if (activeFilters.provider !== 'all') {
+                activeFilters.provider = 'all';
+                const provSel = document.getElementById('filter-provider');
+                if (provSel) provSel.value = 'all';
+            }
+            updateBreadcrumb();
+            switchTab('providers', { preserveDrilldown: true });
+        }
+
+        function exitProviderDrilldown() {
+            providerDrillId = null;
+            updateBreadcrumb();
+            renderUI();
+        }
+
+        function sortProvidersTable(col) {
+            if (providerSortCol === col) {
+                providerSortDesc = !providerSortDesc;
+            } else {
+                providerSortCol = col;
+                providerSortDesc = true;
+            }
+            renderProvidersList();
+        }
+
+        function renderProvidersList() {
+            document.getElementById('subview-providers-list').style.display = 'block';
+            document.getElementById('subview-provider-drilldown').style.display = 'none';
+
+            const filteredEvents = getFilteredRawEvents();
+            const provAgg = {};
+            filteredEvents.forEach(ev => {
+                const p = ev.provider || 'unknown';
+                if (!provAgg[p]) {
+                    provAgg[p] = { tokens: 0, input: 0, output: 0, cache_read: 0, cost: 0.0, savings: 0.0, requests: 0, sessions: new Set(), models: new Set(), tools: new Set(), repos: new Set() };
+                }
+                const a = provAgg[p];
+                a.tokens += ev.total;
+                a.input += ev.input;
+                a.output += ev.output;
+                a.cache_read += ev.cache_read;
+                a.cost += ev.cost || 0;
+                a.savings += ev.savings || 0;
+                a.requests += 1;
+                if (ev.session_id) a.sessions.add(ev.session_id);
+                if (ev.model) a.models.add(ev.model);
+                if (ev.tool) a.tools.add(ev.tool);
+                if (ev.project) a.repos.add(ev.project);
+            });
+
+            const headers = document.querySelectorAll('#providers-table th');
+            const colMap = ['provider', 'type', 'tokens', 'requests', 'sessions', 'cost'];
+            headers.forEach((h, idx) => {
+                h.className = '';
+                const colName = colMap[idx];
+                if (colName === providerSortCol) {
+                    h.className = providerSortDesc ? 'sort-desc' : 'sort-asc';
+                }
+            });
+
+            const provArr = Object.keys(provAgg).map(p => ({
+                provider: p,
+                type: (p === 'local' ? 'local' : 'cloud'),
+                tokens: provAgg[p].tokens,
+                requests: provAgg[p].requests,
+                sessions: provAgg[p].sessions.size,
+                cost: provAgg[p].cost,
+                savings: provAgg[p].savings,
+                models: provAgg[p].models.size,
+                tools: provAgg[p].tools.size,
+                repos: provAgg[p].repos.size
+            }));
+
+            provArr.sort((a, b) => {
+                let vA = a[providerSortCol];
+                let vB = b[providerSortCol];
+                if (typeof vA === 'string') {
+                    return providerSortDesc ? vB.localeCompare(vA) : vA.localeCompare(vB);
+                }
+                return providerSortDesc ? vB - vA : vA - vB;
+            });
+
+            const tbody = document.getElementById('providers-table-body');
+            tbody.innerHTML = '';
+            if (provArr.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 3rem; color: var(--text-muted);">No providers match active filters.</td></tr>';
+                return;
+            }
+
+            provArr.forEach(r => {
+                const tr = document.createElement('tr');
+                tr.className = 'clickable-row';
+                tr.onclick = () => drilldownProvider(r.provider);
+                tr.innerHTML = `
+                    <td><span class="pill ${providerChipClass(r.provider)}" style="font-weight:600;">${escapeHtml(providerDisplayName(r.provider))}</span></td>
+                    <td><span class="pill ${r.type === 'local' ? 'pill-emerald' : 'pill-orange'}">${r.type === 'local' ? 'Local' : 'Cloud'}</span></td>
+                    <td style="text-align: right; font-family: monospace; font-weight:600;">${formatNumber(r.tokens)}</td>
+                    <td style="text-align: right;">${r.requests}</td>
+                    <td style="text-align: right;">${r.sessions}</td>
+                    <td style="text-align: right; font-family: monospace; font-weight:600;">$${r.cost.toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderProviderDrilldown(p) {
+            document.getElementById('subview-providers-list').style.display = 'none';
+            const subview = document.getElementById('subview-provider-drilldown');
+            subview.style.display = 'flex';
+
+            const isLocal = p === 'local';
+            document.getElementById('provider-drilldown-title').innerText = 'Provider: ' + providerDisplayName(p);
+
+            const filteredEvents = getFilteredRawEvents().filter(ev => eventMatchesProvider(ev, p));
+
+            let totalTokens = 0;
+            let totalInput = 0;
+            let totalOutput = 0;
+            let cachedTokens = 0;
+            let cost = 0.0;
+            let avoidance = 0.0;
+            const modelsMap = {};
+            const toolsMap = {};
+            const reposMap = {};
+            const sessionsSet = new Set();
+            const provRawMap = {};
+
+            filteredEvents.forEach(ev => {
+                totalTokens += ev.total;
+                totalInput += ev.input;
+                totalOutput += ev.output;
+                cachedTokens += ev.cache_read;
+                cost += ev.cost || 0;
+                if (isLocal) avoidance += ev.cloud_avoidance || 0;
+                modelsMap[ev.model] = (modelsMap[ev.model] || 0) + ev.total;
+                toolsMap[ev.tool] = (toolsMap[ev.tool] || 0) + ev.total;
+                reposMap[ev.project] = (reposMap[ev.project] || 0) + ev.total;
+                if (ev.session_id) sessionsSet.add(ev.session_id);
+                const rp = ev.provider || 'unknown';
+                provRawMap[rp] = (provRawMap[rp] || 0) + ev.total;
+            });
+
+            document.getElementById('provider-drilldown-meta').innerText =
+                `${formatNumber(filteredEvents.length)} events · ${formatNumber(sessionsSet.size)} sessions · ${formatNumber(Object.keys(reposMap).length)} repos · ${formatNumber(cachedTokens)} cached`;
+
+            document.getElementById('provider-drill-tokens').innerText = formatNumber(totalTokens);
+            document.getElementById('provider-drill-io').innerText = `${formatNumber(totalInput)} / ${formatNumber(totalOutput)}`;
+            document.getElementById('provider-drill-cost').innerText = '$' + cost.toFixed(2);
+            document.getElementById('provider-drill-requests').innerText = formatNumber(filteredEvents.length);
+            document.getElementById('provider-drill-sessions').innerText = formatNumber(sessionsSet.size);
+
+            const avoidCard = document.getElementById('provider-drill-avoidance-card');
+            if (isLocal) {
+                avoidCard.style.display = '';
+                document.getElementById('provider-drill-avoidance').innerText = '$' + avoidance.toFixed(4);
+            } else {
+                avoidCard.style.display = 'none';
+            }
+
+            // Provider chips: for the cloud bucket, expose the raw provider split
+            const chipsRow = document.getElementById('provider-drill-chips');
+            chipsRow.innerHTML = '';
+            if (!isLocal) {
+                Object.keys(provRawMap).sort((a, b) => provRawMap[b] - provRawMap[a]).forEach(rp => {
+                    const chip = document.createElement('span');
+                    chip.className = 'pill clickable-row ' + providerChipClass(rp);
+                    chip.style.cursor = 'pointer';
+                    chip.title = 'Drill into ' + providerDisplayName(rp);
+                    chip.onclick = () => drilldownProvider(rp);
+                    chip.innerHTML = `${escapeHtml(providerDisplayName(rp))} · ${formatNumber(provRawMap[rp])} tokens`;
+                    chipsRow.appendChild(chip);
+                });
+            } else {
+                chipsRow.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem;">All events here are local inference behind your proxy.</span>';
+            }
+
+            // Models list
+            const modelsList = document.getElementById('provider-drill-models-list');
+            modelsList.innerHTML = '';
+            Object.keys(modelsMap).sort((a, b) => modelsMap[b] - modelsMap[a]).slice(0, 8).forEach(m => {
+                const pct = totalTokens > 0 ? (modelsMap[m] / totalTokens * 100).toFixed(1) : 0;
+                modelsList.innerHTML += `
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
+                        <span class="pill pill-purple" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(m)}">${escapeHtml(m)}</span>
+                        <span style="font-family:monospace;">${formatNumber(modelsMap[m])} (${pct}%)</span>
+                    </div>
+                `;
+            });
+
+            // Tools list
+            const toolsList = document.getElementById('provider-drill-tools-list');
+            toolsList.innerHTML = '';
+            Object.keys(toolsMap).sort((a, b) => toolsMap[b] - toolsMap[a]).slice(0, 8).forEach(t => {
+                const staticTool = (TELEMETRY_DATA.tools || []).find(tool => tool.tool_name === t) || { display_name: t };
+                const pct = totalTokens > 0 ? (toolsMap[t] / totalTokens * 100).toFixed(1) : 0;
+                toolsList.innerHTML += `
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
+                        <span class="pill pill-orange">${escapeHtml(staticTool.display_name)}</span>
+                        <span style="font-family:monospace;">${formatNumber(toolsMap[t])} (${pct}%)</span>
+                    </div>
+                `;
+            });
+
+            // Top repos
+            const reposList = document.getElementById('provider-drill-repos-list');
+            reposList.innerHTML = '';
+            Object.keys(reposMap).sort((a, b) => reposMap[b] - reposMap[a]).slice(0, 8).forEach(rp => {
+                const pct = totalTokens > 0 ? (reposMap[rp] / totalTokens * 100).toFixed(1) : 0;
+                reposList.innerHTML += `
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
+                        <span class="pill pill-blue" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(rp)}">${escapeHtml(rp)}</span>
+                        <span style="font-family:monospace;">${formatNumber(reposMap[rp])} (${pct}%)</span>
+                    </div>
+                `;
+            });
+
+            // Recent events
+            const eventsBody = document.getElementById('provider-drill-events-body');
+            eventsBody.innerHTML = '';
+            const recent = filteredEvents.slice().sort((a, b) => (b.occurred_at || '').localeCompare(a.occurred_at || '')).slice(0, 50);
+            if (recent.length === 0) {
+                eventsBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">No events for this provider.</td></tr>';
+            }
+            recent.forEach(ev => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="white-space:nowrap; font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(ev.occurred_at || '')}</td>
+                    <td><span class="pill pill-orange">${escapeHtml(ev.tool || 'Unknown')}</span></td>
+                    <td style="font-family:monospace; font-size:0.8rem;">${escapeHtml(ev.model || 'Unknown')}</td>
+                    <td style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(ev.project || 'N/A')}</td>
+                    <td style="text-align:right; font-family:monospace; font-size:0.8rem;">${formatNumber(ev.input)} / ${formatNumber(ev.output)}</td>
+                    <td style="text-align:right; font-family:monospace; font-size:0.8rem;">$${(ev.cost || 0).toFixed(3)}</td>
+                `;
+                eventsBody.appendChild(tr);
+            });
+        }
+
         // ================= OVERVIEW RENDERING =================
         function renderOverview() {
             let filteredEvents = getFilteredRawEvents();
             // Never show an empty dashboard when no filters are active. This
             // also protects against browser autofill/localStorage races.
-            if (!filteredEvents.length && activeFilters.project === 'all' && activeFilters.model === 'all' && activeFilters.tool === 'all' && activeFilters.timeframe === 'all') {
+            if (!filteredEvents.length && activeFilters.project === 'all' && activeFilters.model === 'all' && activeFilters.tool === 'all' && activeFilters.provider === 'all' && activeFilters.timeframe === 'all') {
                 filteredEvents = TELEMETRY_DATA.events || [];
             }
             
@@ -2626,6 +3055,15 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
+                            onClick: function(evt, elements) {
+                                if (elements && elements.length > 0) {
+                                    drilldownProvider(elements[0].index === 0 ? 'local' : 'cloud');
+                                }
+                            },
+                            onHover: function(evt, elements) {
+                                const canvas = document.getElementById('localCloudChartOverview');
+                                if (canvas) canvas.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+                            },
                             plugins: {
                                 legend: { position: 'bottom', labels: { color: '#a6ada0', boxWidth: 12 } }
                             }
@@ -3337,7 +3775,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         requests: 0,
                         repositories_used: new Set(),
                         estimated_cost: 0.0,
-                        estimated_savings: 0.0
+                        estimated_savings: 0.0,
+                        providers: {}
                     };
                 }
                 const m = modelAgg[mdl];
@@ -3349,6 +3788,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 if (ev.project) m.repositories_used.add(ev.project);
                 m.estimated_cost += ev.cost;
                 m.estimated_savings += (ev.savings || 0);
+                const evProv = ev.provider || 'unknown';
+                m.providers[evProv] = (m.providers[evProv] || 0) + ev.total;
             });
 
             const mData = Object.keys(modelAgg).map(k => {
@@ -3356,8 +3797,11 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 const avgContext = m.requests > 0 ? Math.round(m.input / m.requests) : 0;
                 const avgComp = m.requests > 0 ? Math.round(m.output / m.requests) : 0;
                 const cacheRatio = (m.input + m.cache_read) > 0 ? (m.cache_read / (m.input + m.cache_read)) : 0;
+                const provIds = Object.keys(m.providers || {});
+                const dominantProvider = provIds.length ? provIds.sort((a, b) => m.providers[b] - m.providers[a])[0] : 'unknown';
                 return {
                     model_name: k,
+                    provider: dominantProvider,
                     total_tokens: m.total_tokens,
                     requests: m.requests,
                     average_context: avgContext,
@@ -3370,7 +3814,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             }).sort((a, b) => b.total_tokens - a.total_tokens);
 
             if (mData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 3rem; color: var(--text-muted);">No models match active filters.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 3rem; color: var(--text-muted);">No models match active filters.</td></tr>';
             }
 
             mData.forEach(m => {
@@ -3380,6 +3824,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td><span class="pill pill-purple" style="font-weight:600;">${escapeHtml(m.model_name)}</span></td>
+                    <td><span class="pill provider-pill-js ${providerChipClass(m.provider)}" style="cursor:pointer; font-weight:600;"></span></td>
                     <td style="text-align: right; font-family: monospace; font-weight: 600;">${formatNumber(m.total_tokens)}</td>
                     <td style="text-align: right;">${m.requests}</td>
                     <td style="text-align: right; font-family: monospace;">${formatNumber(m.average_context)}</td>
@@ -3390,6 +3835,12 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <td style="font-size:0.8rem; color:var(--text-secondary); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(reposStr)}">${escapeHtml(reposStr)}</td>
                 `;
                 tbody.appendChild(tr);
+                const pPill = tr.querySelector('.provider-pill-js');
+                if (pPill) {
+                    pPill.textContent = providerDisplayName(m.provider);
+                    pPill.title = 'Drill into ' + providerDisplayName(m.provider);
+                    pPill.onclick = () => drilldownProvider(m.provider);
+                }
             });
 
             // Model comparisons charts (bar comparison)
