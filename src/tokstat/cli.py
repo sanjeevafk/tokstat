@@ -223,6 +223,17 @@ def cmd_collect(once):
     run_collectors_once()
 
 
+def cmd_proxy(action, upstream=None, port=None, agent_name=None):
+    from . import proxy
+
+    if action == "start":
+        proxy.start_proxy_daemon(upstream=upstream, port=port, agent_name=agent_name)
+    elif action == "stop":
+        proxy.stop_proxy_daemon()
+    elif action == "status":
+        print(json.dumps(proxy.proxy_daemon_status(), indent=2))
+
+
 def _open_dashboard(path):
     """Best-effort open of the generated dashboard in the default browser."""
     url = "file://" + os.path.abspath(path)
@@ -287,6 +298,16 @@ def main():
         parser.add_argument("--once", action="store_true", help="Run all collectors once")
         args = parser.parse_args(argv[1:])
         cmd_collect(args.once)
+        return
+
+    if argv and argv[0] == "proxy":
+        parser = argparse.ArgumentParser(prog="tokstat proxy")
+        parser.add_argument("action", choices=["start", "stop", "status"])
+        parser.add_argument("--upstream", default=None, help="Upstream LLM server URL")
+        parser.add_argument("--port", type=int, default=None, help="Proxy listen port")
+        parser.add_argument("--agent-name", default=None, help="Telemetry agent_name")
+        args = parser.parse_args(argv[1:])
+        cmd_proxy(args.action, upstream=args.upstream, port=args.port, agent_name=args.agent_name)
         return
 
     parser = argparse.ArgumentParser(description="AI Engineering Observatory - Developer Token Tracker")
