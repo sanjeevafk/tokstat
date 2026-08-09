@@ -11,6 +11,9 @@ Environment overrides:
   TOKSTAT_PROXY_UPSTREAM - override the local-model proxy upstream URL
   TOKSTAT_PROXY_PORT     - override the local-model proxy listen port
   TOKSTAT_PROXY_AGENT_NAME - override the local-model proxy agent name
+  TOKSTAT_SYNC_ENABLED     - "1" lets the daemon run `tokstat sync` on an
+                             interval (opt-in provider usage polling; see
+                             [sync] in config.toml)
 """
 import os
 import sqlite3
@@ -190,6 +193,27 @@ def gpu_cost_settings() -> dict:
     """[proxy.gpu_cost] optional electricity/cloud-GPU hourly cost (informational)."""
     return (load_config().get("proxy") or {}).get("gpu_cost") or {}
 
+
+def sync_settings() -> dict:
+    """Merged [sync] settings: config.toml values overridden by env vars.
+
+    Controls the opt-in provider usage poller (`tokstat sync`): enabled makes
+    the daemon run it on an interval; lookback_days is the provider history
+    window; interval_hours is the minimum time between daemon-triggered runs.
+    The bare `tokstat` command and the daemon default make NO outbound calls
+    unless enabled here (see docs/hybrid_sync_plan.md).
+    """
+    cfg = load_config().get("sync") or {}
+    env_enabled = os.environ.get("TOKSTAT_SYNC_ENABLED")
+    return {
+        "enabled": (
+            (env_enabled == "1") if env_enabled is not None else bool(cfg.get("enabled", False))
+        ),
+        "lookback_days": int(cfg.get("lookback_days", 365)),
+        "interval_hours": float(cfg.get("interval_hours", 6.0)),
+        "anthropic_api_key": str(cfg.get("anthropic_api_key") or ""),
+        "openai_api_key": str(cfg.get("openai_api_key") or ""),
+    }
 
 # --- Runtime tuning ---------------------------------------------------------
 WATCH_POLL_INTERVAL_SEC = 3

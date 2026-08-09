@@ -174,6 +174,18 @@ def run_foreground() -> None:
         while not stop_event.is_set():
             try:
                 results = run_collectors_once()
+                # Opt-in authoritative provider usage sync ([sync] enabled = true
+                # in config.toml). Interval-guarded; never runs automatically for
+                # the bare `tokstat` command.
+                if config.sync_settings()["enabled"]:
+                    try:
+                        from . import sync as sync_mod
+
+                        sync_result = sync_mod.maybe_sync()
+                        if sync_result:
+                            _logger.info("provider sync: %s", sync_result)
+                    except Exception as sync_exc:
+                        _logger.error("provider sync failed: %s", sync_exc)
                 ingest.collector_status = {
                     r["collector"]: {
                         "events": r["events"],

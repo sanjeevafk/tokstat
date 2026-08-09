@@ -89,6 +89,30 @@ listen_port = 11435
         self._with_config("this is not [ valid toml at all = = =")  # noqa: E501
         self.assertEqual(config.proxy_settings()["upstream"], "http://localhost:11434")
 
+    def test_sync_settings_defaults_when_no_file(self):
+        with patch.object(config, "CONFIG_FILE", "/nonexistent/config.toml"), \
+             patch.dict(os.environ, {}, clear=True):
+            s = config.sync_settings()
+        self.assertFalse(s["enabled"])
+        self.assertEqual(s["lookback_days"], 365)
+        self.assertEqual(s["interval_hours"], 6.0)
+
+    def test_sync_settings_from_toml_and_env(self):
+        self._with_config(
+            """
+[sync]
+enabled = true
+lookback_days = 90
+interval_hours = 12.0
+"""
+        )
+        s = config.sync_settings()
+        self.assertTrue(s["enabled"])
+        self.assertEqual(s["lookback_days"], 90)
+        self.assertEqual(s["interval_hours"], 12.0)
+        with patch.dict(os.environ, {"TOKSTAT_SYNC_ENABLED": "0"}):
+            self.assertFalse(config.sync_settings()["enabled"])
+
 
 class TestConfig(unittest.TestCase):
     def test_paths_under_tokstat_dir(self):
