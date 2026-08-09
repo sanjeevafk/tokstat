@@ -1253,6 +1253,14 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     </select>
                 </div>
                 <div class="filter-group">
+                    <span class="filter-label">Provider:</span>
+                    <select class="filter-select" id="filter-provider" onchange="applyFilters()">
+                        <option value="all">All</option>
+                        <option value="cloud">Cloud</option>
+                        <option value="local">Local</option>
+                    </select>
+                </div>
+                <div class="filter-group">
                     <span class="filter-label">Timeframe:</span>
                     <div class="date-btns">
                         <button class="date-btn active" id="date-all" onclick="setDateRange('all')">All</button>
@@ -1324,6 +1332,16 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                             <span>Cache Savings: <span id="stat-savings" class="trend-up">$0.00</span></span>
                         </div>
                     </div>
+                    <div class="metric-card card-glow-emerald" id="local-avoidance-card">
+                        <div class="metric-header">
+                            <span>Cloud Cost Avoidance</span>
+                            <svg style="width: 16px; height: 16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+                        </div>
+                        <div class="metric-value" id="stat-cloud-avoidance">$0.0000</div>
+                        <div class="metric-footer">
+                            <span>Local tokens: <span id="stat-local-tokens">0</span></span>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="metrics-grid" style="margin-top: -0.5rem;">
@@ -1372,6 +1390,43 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                         </div>
                         <div class="chart-wrapper" style="display: flex; align-items: center; justify-content: center; min-height: 320px;">
                             <canvas id="modelChartOverview" style="max-height: 420px; min-height: 300px; width: 100%;"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Local vs Cloud row (shown only when local inference data exists) -->
+                <div class="two-col-grid" id="local-inference-row" style="display: none;">
+                    <div class="panel-card">
+                        <div class="panel-header">
+                            <div>
+                                <h2 class="panel-title">Local vs Cloud Usage</h2>
+                                <p class="panel-subtitle">Token split between on-premise inference and cloud APIs</p>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="localCloudChartOverview"></canvas>
+                        </div>
+                    </div>
+                    <div class="panel-card">
+                        <div class="panel-header">
+                            <div>
+                                <h2 class="panel-title">Local Models</h2>
+                                <p class="panel-subtitle">Tokens consumed per local model</p>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Model</th>
+                                        <th style="text-align: right;">Tokens</th>
+                                        <th style="text-align: right;">Requests</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="local-models-table">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -2018,6 +2073,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             project: 'all',
             model: 'all',
             tool: 'all',
+            provider: 'all',
             timeframe: 'all'
         };
 
@@ -2028,7 +2084,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             repoDrill: null,
             modelCompTokens: null,
             modelCompRequests: null,
-            modelCompCache: null
+            modelCompCache: null,
+            localCloud: null
         };
 
         // Helper to format number
@@ -2107,6 +2164,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             if (activeFilters.project !== 'all' && !validProjects.has(activeFilters.project)) activeFilters.project = 'all';
             if (activeFilters.model !== 'all' && !validModels.has(activeFilters.model)) activeFilters.model = 'all';
             if (activeFilters.tool !== 'all' && !validTools.has(activeFilters.tool)) activeFilters.tool = 'all';
+            if (!['all', 'cloud', 'local'].includes(activeFilters.provider)) activeFilters.provider = 'all';
             if (!['all', '24h', '7d', '30d', '90d'].includes(activeFilters.timeframe)) activeFilters.timeframe = 'all';
             localStorage.setItem('obs_filters', JSON.stringify(activeFilters));
             
@@ -2114,6 +2172,7 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             document.getElementById('filter-project').value = activeFilters.project;
             document.getElementById('filter-model').value = activeFilters.model;
             document.getElementById('filter-tool').value = activeFilters.tool;
+            document.getElementById('filter-provider').value = activeFilters.provider;
             setDateBtnActive(activeFilters.timeframe);
 
             renderUI();
@@ -2374,6 +2433,9 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                 if (activeFilters.model !== 'all' && mdl !== activeFilters.model) return false;
                 // Tool filter
                 if (activeFilters.tool !== 'all' && tool !== activeFilters.tool) return false;
+                // Provider filter (local vs cloud)
+                if (activeFilters.provider === 'local' && ev.provider !== 'local') return false;
+                if (activeFilters.provider === 'cloud' && ev.provider === 'local') return false;
                 // Timeframe filter
                 if (!matchesTimeframe(ev.occurred_at)) return false;
                 
@@ -2515,6 +2577,75 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             document.getElementById('stat-avg-context').innerText = formatNumber(avgContext);
             document.getElementById('stat-avg-request-tokens').innerText = formatNumber(avgTokensReq) + ' / req';
             document.getElementById('stat-avg-session-tokens').innerText = formatNumber(avgTokensSess) + ' / sess';
+
+            // --- Local inference card + Local vs Cloud donut ---
+            let localTokens = 0;
+            let cloudAvoidance = 0.0;
+            const localModelMap = {};
+            filteredEvents.forEach(ev => {
+                if (ev.provider === 'local') {
+                    localTokens += ev.total;
+                    cloudAvoidance += ev.cloud_avoidance || 0;
+                    if (!localModelMap[ev.model]) localModelMap[ev.model] = { tokens: 0, requests: 0 };
+                    localModelMap[ev.model].tokens += ev.total;
+                    localModelMap[ev.model].requests += ev.requests || 1;
+                }
+            });
+            const goLocal = TELEMETRY_DATA.global_overview || {};
+            if (isAllDefault && goLocal.local_inference && goLocal.local_inference.total_tokens > localTokens) {
+                localTokens = goLocal.local_inference.total_tokens;
+                cloudAvoidance = goLocal.local_inference.cloud_cost_avoidance || 0;
+            }
+            document.getElementById('stat-local-tokens').innerText = formatNumber(localTokens);
+            document.getElementById('stat-cloud-avoidance').innerText = '$' + cloudAvoidance.toFixed(4);
+            const avoidCard = document.getElementById('local-avoidance-card');
+            if (avoidCard) avoidCard.style.display = localTokens > 0 ? '' : 'none';
+
+            const localRow = document.getElementById('local-inference-row');
+            if (localRow) {
+                localRow.style.display = localTokens > 0 ? '' : 'none';
+                if (localTokens > 0) {
+                    const cloudTokens = Math.max(0, totalTokens - localTokens);
+                    if (charts.localCloud) charts.localCloud.destroy();
+                    const ctxLocal = document.getElementById('localCloudChartOverview').getContext('2d');
+                    charts.localCloud = new Chart(ctxLocal, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Local', 'Cloud'],
+                            datasets: [{
+                                data: [localTokens, cloudTokens],
+                                backgroundColor: ['#b9dc75', '#ff7849'],
+                                borderColor: '#111512',
+                                borderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'bottom', labels: { color: '#a6ada0', boxWidth: 12 } }
+                            }
+                        }
+                    });
+                    const localTbody = document.getElementById('local-models-table');
+                    if (localTbody) {
+                        localTbody.innerHTML = '';
+                        const localModels = Object.keys(localModelMap).sort((a, b) => localModelMap[b].tokens - localModelMap[a].tokens);
+                        if (localModels.length === 0) {
+                            localTbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--text-muted);">No local model data</td></tr>';
+                        }
+                        localModels.forEach(m => {
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td><span style="font-weight:600;">${escapeHtml(m)}</span></td>
+                                <td style="text-align: right; font-family: monospace;">${formatNumber(localModelMap[m].tokens)}</td>
+                                <td style="text-align: right;">${formatNumber(localModelMap[m].requests)}</td>
+                            `;
+                            localTbody.appendChild(row);
+                        });
+                    }
+                }
+            }
 
             // Populate Overview Active Repos table (top 5)
             const repoMap = {};
@@ -3792,6 +3923,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
         "stat-active-repos": f"{overview.get('active_repositories_count', 0):,}",
         "stat-active-models": f"{overview.get('active_models_count', 0):,}",
         "stat-active-tools": f"{overview.get('active_tools_count', 0):,}",
+        "stat-local-tokens": compact_number((overview.get("local_inference") or {}).get("total_tokens")),
+        "stat-cloud-avoidance": f"${(overview.get('local_inference') or {}).get('cloud_cost_avoidance', 0):.4f}",
     }
     for element_id, value in initial_metrics.items():
         html_content = html_content.replace(
@@ -3802,6 +3935,8 @@ def generate_html_report(report_data, output_path, watch_mode=False):
             f'id="{element_id}">0%</', f'id="{element_id}">{value}'
         ).replace(
             f'id="{element_id}">$0.00</', f'id="{element_id}">{value}</'
+        ).replace(
+            f'id="{element_id}">$0.0000</', f'id="{element_id}">{value}</'
         )
 
     html_content = html_content.replace("__SCOPE_PROVIDER__", compact_number(overview.get("provider_reported_tokens", overview.get("total_tokens", 0))))

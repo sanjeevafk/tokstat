@@ -74,7 +74,18 @@ def export_csv(report_data, base_dir):
                     s["total_tokens"], s["input"], s["output"], s["cache_read"], f"{s['estimated_cost']:.4f}", f"{s['estimated_savings']:.4f}"
                 ])
                 
-        print(f"Exported CSVs to {base_dir} (repositories.csv, sessions.csv)")
+        # 3. Export Local Models CSV (only when local inference data exists)
+        li = (report_data.get("global_overview") or {}).get("local_inference") or {}
+        if li.get("total_tokens"):
+            local_path = os.path.join(base_dir, "local_models.csv")
+            with open(local_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Model", "Total Tokens", "Requests", "Cloud Cost Avoidance USD"])
+                for m in li.get("models_detail", []):
+                    writer.writerow([m["model"], m["tokens"], m["requests"], f"{li['cloud_cost_avoidance']:.4f}"])
+
+        print(f"Exported CSVs to {base_dir} (repositories.csv, sessions.csv"
+              + (", local_models.csv)" if li.get("total_tokens") else ")"))
         return True
     except Exception as e:
         print(f"Failed to export CSVs: {e}")
@@ -102,6 +113,15 @@ def export_markdown(report_data, path):
         md.append(f"- **Peak Usage Day:** {go['peak_usage_day']} ({format_tokens(go['peak_usage_tokens'])} tokens)")
         md.append(f"- **Longest Coding Session:** {go['longest_session_duration'] // 60} minutes")
         md.append("")
+        
+        li = go.get("local_inference") or {}
+        if li.get("total_tokens"):
+            md.append("## Local Inference (On-Premise)")
+            md.append(f"- **Local Tokens:** {format_tokens(li['total_tokens'])}")
+            md.append(f"- **Local Requests:** {li.get('requests', 0):,}")
+            md.append(f"- **Cloud Cost Avoidance:** ${li.get('cloud_cost_avoidance', 0):.4f}")
+            md.append(f"- **Local Models:** {', '.join(li.get('models_used', [])) or 'N/A'}")
+            md.append("")
         
         md.append("## Repository Analytics")
         md.append("| Repository | Total Tokens | Requests | Sessions | Cache Ratio % | Commits | Branch |")
@@ -182,7 +202,22 @@ def export_pdf(report_data, path):
             pdf.set_font('Helvetica', '', 9)
             pdf.cell(45, 6, clean_txt(m[3]), 0, 1)
             
-        pdf.ln(6)
+        li = go.get("local_inference") or {}
+        if li.get("total_tokens"):
+            pdf.ln(3)
+            pdf.set_font('Helvetica', 'B', 12)
+            pdf.set_fill_color(240, 243, 246)
+            pdf.cell(0, 8, ' Local Inference (On-Premise)', ln=1, fill=True)
+            pdf.ln(3)
+            pdf.set_font('Helvetica', '', 10)
+            pdf.cell(0, 6, clean_txt(
+                f"Local Tokens: {li['total_tokens']:,} | Requests: {li.get('requests', 0)} | "
+                f"Cloud Cost Avoidance: ${li.get('cloud_cost_avoidance', 0):.4f}"
+            ), ln=1)
+            pdf.cell(0, 6, clean_txt(
+                f"Local Models: {', '.join(li.get('models_used', [])) or 'N/A'}"
+            ), ln=1)
+            pdf.ln(4)
         
         # 2. Section: Repositories
         pdf.set_font('Helvetica', 'B', 12)
