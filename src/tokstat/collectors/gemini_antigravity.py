@@ -247,6 +247,11 @@ class GeminiAntigravityCollector(BaseCollector):
             # Estimate cache read tokens for multi-turn prefix reuse
             cache_read_est = max(0, input_est - step_tokens) if input_est > step_tokens else 0
 
+            # dedup_key must include created_at: dedup_key is UNIQUE in the schema
+            # and step_index rolls back to 0 on session restarts (and on file
+            # truncate-and-rewrite). Without a time discriminator, a restarted
+            # session's steps would collide with the original session's and be
+            # silently dropped by INSERT OR IGNORE.
             events.append({
                 "event_id": None,
                 "occurred_at": created_at,
@@ -266,7 +271,7 @@ class GeminiAntigravityCollector(BaseCollector):
                 "cost_usd": 0.0,
                 "requests": 1,
                 "status": "estimated",
-                "dedup_key": f"antigravity-{session_id}-{step_idx}",
+                "dedup_key": f"antigravity-{session_id}-{step_idx}-{created_at}",
             })
 
         return events

@@ -286,6 +286,55 @@ class TestGeminiAntigravityCollector(unittest.TestCase):
         # Third event should have a much smaller input_tokens than second
         self.assertLess(events[2]["input_tokens"], events[1]["input_tokens"])
 
+    def test_restart_events_survive_db_insert_dedup(self):
+        """Restarted-session events must not be dropped by the UNIQUE dedup_key.
+
+        Regression: dedup_key used to be antigravity-{session}-{step_idx}, so a
+        restarted session's step 0 collided with the first session's step 0 and
+        INSERT OR IGNORE silently dropped it (only 2 of 3 rows inserted).
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            brain_dir = os.path.join(tmp, "antigravity-cli", "brain")
+            log_dir = os.path.join(brain_dir, "sess-uuid", ".system_generated", "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(tmp, "antigravity-cli", "settings.json"), "w") as f:
+                json.dump({"model": "Gemini 2.5 Flash"}, f)
+            lines = [
+                {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
+                 "status": "DONE", "created_at": "2026-08-01T10:00:00Z",
+                 "content": "A" * 4000, "tool_calls": []},
+                {"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE",
+                 "status": "DONE", "created_at": "2026-08-01T10:05:00Z",
+                 "content": "B" * 4000, "tool_calls": []},
+                # step_index rolls back → session restart
+                {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
+                 "status": "DONE", "created_at": "2026-08-01T11:00:00Z",
+                 "content": "C" * 400, "tool_calls": []},
+            ]
+            with open(os.path.join(log_dir, "transcript_full.jsonl"), "w") as f:
+                for line in lines:
+                    f.write(json.dumps(line) + "\n")
+
+            db = os.path.join(tmp, "telemetry.db")
+            conn = config.connect_db(db)
+            try:
+                with patch.object(config, "GEMINI_BRAIN_DIRS", [brain_dir]):
+                    result = GeminiAntigravityCollector().run_once(conn)
+                self.assertEqual(result["inserted"], 3, "restarted step 0 must not be dropped")
+                self.assertEqual(result["skipped"], 0)
+                rows = conn.execute(
+                    "SELECT session_id, turn_id, dedup_key FROM usage_events ORDER BY rowid"
+                ).fetchall()
+                self.assertEqual(len(rows), 3)
+                self.assertEqual([r["turn_id"] for r in rows], ["0", "5", "0"])
+                # The whole point: every event must have a distinct dedup key,
+                # even though turn_id 0 repeats after the session restart.
+                keys = [r["dedup_key"] for r in rows]
+                self.assertEqual(len(set(keys)), 3)
+            finally:
+                conn.close()
+
 
 class TestAiderCollector(unittest.TestCase):
     def test_parses_model_stats(self):
