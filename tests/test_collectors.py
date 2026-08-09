@@ -87,13 +87,22 @@ class TestClaudeCodeCollector(unittest.TestCase):
 
 class TestGeminiAntigravityCollector(unittest.TestCase):
     def _fixture(self):
-        brain = os.path.join(config.TOKSTAT_DIR, "brain", "sess-uuid", ".system_generated", "logs")
+        # Mimic the real dir structure so _load_settings_model can find settings.json:
+        # <TOKSTAT_DIR>/antigravity-cli/brain/sess-uuid/.system_generated/logs/
+        brain = os.path.join(config.TOKSTAT_DIR, "antigravity-cli", "brain", "sess-uuid", ".system_generated", "logs")
         os.makedirs(brain, exist_ok=True)
+        # Write a settings.json one level above brain/
+        settings_path = os.path.join(config.TOKSTAT_DIR, "antigravity-cli", "settings.json")
+        if not os.path.exists(settings_path):
+            import json as _json
+            with open(settings_path, "w") as sf:
+                _json.dump({"model": "Gemini 2.5 Flash"}, sf)
         path = os.path.join(brain, "overview.txt")
         with open(path, "w") as f:
             for line in GEMINI_LINES:
                 f.write(json.dumps(line) + "\n")
-        return brain, path
+        brain_dir = os.path.join(config.TOKSTAT_DIR, "antigravity-cli", "brain")
+        return brain_dir, path
 
     def test_deterministic_estimated_events_no_fabrication(self):
         brain, _path = self._fixture()
@@ -108,7 +117,7 @@ class TestGeminiAntigravityCollector(unittest.TestCase):
         for ev in events:
             self.assertEqual(ev["status"], "estimated")
             self.assertEqual(ev["agent_name"], "gemini_cli")
-            self.assertEqual(ev["model_raw"], "gemini-3.5-flash")
+            self.assertEqual(ev["model_raw"], "gemini-2.5-flash")
             self.assertGreaterEqual(ev["input_tokens"], 1)
             self.assertGreaterEqual(ev["output_tokens"], 1)
             self.assertEqual(ev["total_tokens"], ev["input_tokens"] + ev["output_tokens"])
@@ -120,9 +129,162 @@ class TestGeminiAntigravityCollector(unittest.TestCase):
         self.assertEqual(events4, [])  # unchanged files are skipped
 
     def test_session_extraction_from_path(self):
-        brain, path = self._fixture()
+        _brain_dir, path = self._fixture()
         session = GeminiAntigravityCollector._extract_session(path)
         self.assertEqual(session, "sess-uuid")
+
+    def _make_brain(self, subdir: str) -> str:
+        """Helper: create a logs dir and return its path."""
+        brain = os.path.join(config.TOKSTAT_DIR, "brain", subdir, ".system_generated", "logs")
+        os.makedirs(brain, exist_ok=True)
+        return brain
+
+    def _write_transcript(self, brain: str, lines: list, filename: str = "transcript_full.jsonl") -> str:
+        path = os.path.join(brain, filename)
+        with open(path, "w") as f:
+            for line in lines:
+                f.write(json.dumps(line) + "\n")
+        return path
+
+    # --- Bug 1 & 2: settings.json fallback + regex captures full version number ---
+    def test_settings_json_fallback_no_change_tag(self):
+        """When no USER_SETTINGS_CHANGE is present, model comes from settings.json."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_brain_dir = os.path.join(tmp, "antigravity-cli", "brain")
+            os.makedirs(fake_brain_dir, exist_ok=True)
+            settings_file = os.path.join(tmp, "antigravity-cli", "settings.json")
+            with open(settings_file, "w") as f:
+                json.dump({"model": "Claude Opus 4.6"}, f)
+            log_dir = os.path.join(fake_brain_dir, "sess-a", ".system_generated", "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "transcript_full.jsonl")
+            steps = [
+                {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
+                 "status": "DONE", "created_at": "2026-08-01T10:00:00Z",
+                 "content": "Hello", "tool_calls": []},
+            ]
+            with open(log_path, "w") as f:
+                for s in steps:
+                    f.write(json.dumps(s) + "\n")
+
+            with patch.object(config, "GEMINI_BRAIN_DIRS", [fake_brain_dir]):
+                events, _ = GeminiAntigravityCollector().poll({})
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["model_raw"], "claude-opus-4.6")
+        self.assertEqual(events[0]["provider_id"], "anthropic")
+
+    # --- Bug 2: regex must capture full version like '4.6' not just '4' ---
+    def test_dynamic_model_switch_and_provider_attribution(self):
+        brain = self._make_brain("sess-claude")
+        lines = [
+            {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT",
+             "status": "DONE", "created_at": "2026-08-01T12:00:00Z",
+             "content": "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Claude Sonnet 4.6 (Thinking).\n</USER_SETTINGS_CHANGE>"},
+            {"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE",
+             "status": "DONE", "created_at": "2026-08-01T12:00:05Z",
+             "content": "Thinking about the task", "tool_calls": []},
+            {"step_index": 2, "source": "USER_EXPLICIT", "type": "USER_INPUT",
+             "status": "DONE", "created_at": "2026-08-01T12:05:00Z",
+             "content": "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Claude Sonnet 4.6 (Thinking) to Gemini 3.6 Flash (High).\n</USER_SETTINGS_CHANGE>"},
+            {"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE",
+             "status": "DONE", "created_at": "2026-08-01T12:05:05Z",
+             "content": "Switching to Flash", "tool_calls": []},
+        ]
+        self._write_transcript(brain, lines)
+
+        with patch.object(config, "GEMINI_BRAIN_DIRS", [brain]):
+            events, _ = GeminiAntigravityCollector().poll({})
+
+        self.assertEqual(len(events), 2)
+        # Turn 1: must capture full '4.6', not just '4'
+        self.assertEqual(events[0]["model_raw"], "claude-sonnet-4.6")
+        self.assertEqual(events[0]["provider_id"], "anthropic")
+        # Turn 2: Gemini 3.6 Flash
+        self.assertEqual(events[1]["model_raw"], "gemini-3.6-flash")
+        self.assertEqual(events[1]["provider_id"], "google")
+
+    # --- Bug 3 (agent_name) + Bug 4 (global seen_sessions) ---
+    def test_agent_name_cli_vs_ide_and_no_double_count(self):
+        """CLI brain → gemini_cli, IDE brain → gemini_ide. Shared session ID counted once."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            cli_brain = os.path.join(tmp, "antigravity-cli", "brain")
+            ide_brain = os.path.join(tmp, "antigravity", "brain")
+            shared_session = "shared-uuid-1234"
+            for brain_dir, suffix in [(cli_brain, "antigravity-cli"), (ide_brain, "antigravity")]:
+                log_dir = os.path.join(brain_dir, shared_session, ".system_generated", "logs")
+                os.makedirs(log_dir, exist_ok=True)
+                settings_file = os.path.join(tmp, suffix, "settings.json")
+                with open(settings_file, "w") as f:
+                    json.dump({"model": "Gemini 3.6 Flash"}, f)
+                with open(os.path.join(log_dir, "transcript_full.jsonl"), "w") as f:
+                    f.write(json.dumps({
+                        "step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
+                        "status": "DONE", "created_at": "2026-08-01T08:00:00Z",
+                        "content": "hi", "tool_calls": [],
+                    }) + "\n")
+
+            with patch.object(config, "GEMINI_BRAIN_DIRS", [cli_brain, ide_brain]):
+                events, _ = GeminiAntigravityCollector().poll({})
+
+        # Same session UUID in both brain dirs → only ONE event emitted
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["agent_name"], "gemini_cli")  # CLI wins (first)
+
+    def test_distinct_sessions_both_brain_dirs_counted(self):
+        """Different session IDs in CLI and IDE are both counted."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            cli_brain = os.path.join(tmp, "antigravity-cli", "brain")
+            ide_brain = os.path.join(tmp, "antigravity", "brain")
+            for brain_dir, suffix, sess, agent in [
+                (cli_brain, "antigravity-cli", "cli-sess-001", "gemini_cli"),
+                (ide_brain, "antigravity", "ide-sess-002", "gemini_ide"),
+            ]:
+                log_dir = os.path.join(brain_dir, sess, ".system_generated", "logs")
+                os.makedirs(log_dir, exist_ok=True)
+                with open(os.path.join(tmp, suffix, "settings.json"), "w") as f:
+                    json.dump({"model": "Gemini 3.6 Flash"}, f)
+                with open(os.path.join(log_dir, "transcript_full.jsonl"), "w") as f:
+                    f.write(json.dumps({
+                        "step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
+                        "status": "DONE", "created_at": "2026-08-01T09:00:00Z",
+                        "content": "hi", "tool_calls": [],
+                    }) + "\n")
+
+            with patch.object(config, "GEMINI_BRAIN_DIRS", [cli_brain, ide_brain]):
+                events, _ = GeminiAntigravityCollector().poll({})
+
+        self.assertEqual(len(events), 2)
+        agent_names = {e["agent_name"] for e in events}
+        self.assertIn("gemini_cli", agent_names)
+        self.assertIn("gemini_ide", agent_names)
+
+    # --- Bug 6: session restart resets accumulator ---
+    def test_session_restart_resets_context_accumulator(self):
+        brain = self._make_brain("sess-restart")
+        lines = [
+            {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
+             "status": "DONE", "created_at": "2026-08-01T10:00:00Z",
+             "content": "A" * 4000, "tool_calls": []},   # 1000 tokens
+            {"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE",
+             "status": "DONE", "created_at": "2026-08-01T10:05:00Z",
+             "content": "B" * 4000, "tool_calls": []},   # accumulated: 2000+
+            # step_index rolls back → session restart
+            {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
+             "status": "DONE", "created_at": "2026-08-01T11:00:00Z",
+             "content": "C" * 400, "tool_calls": []},    # fresh session: only 100
+        ]
+        self._write_transcript(brain, lines)
+
+        with patch.object(config, "GEMINI_BRAIN_DIRS", [brain]):
+            events, _ = GeminiAntigravityCollector().poll({})
+
+        self.assertEqual(len(events), 3)
+        # Third event should have a much smaller input_tokens than second
+        self.assertLess(events[2]["input_tokens"], events[1]["input_tokens"])
 
 
 class TestAiderCollector(unittest.TestCase):
