@@ -4,6 +4,35 @@ All notable changes to **tokstat-observatory** (CLI: `tokstat`) are documented
 here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-09
+
+### Added
+
+- **Local model support** — stdlib-only transparent proxy
+  (`tokstat proxy start|stop|status`, or inside the daemon via `[proxy]
+  enabled = true`) forwards OpenAI-compatible and Ollama-native requests to
+  Ollama / llama.cpp / vLLM / LM Studio and captures **real token usage** from
+  their responses, including SSE streaming (final-chunk `usage` or
+  `prompt_eval_count`/`eval_count`).
+- **Honest local cost model** — local events are recorded with
+  `provider_id="local"` and `cost_usd = 0.0`; a **Cloud Cost Avoidance**
+  estimate (via `utils.LOCAL_TO_CLOUD_MAP`, overridable with
+  `[pricing.overrides]` in config.toml) shows what those tokens would have
+  cost through an API.
+- **Config file** — optional `~/.tokstat/config.toml` (stdlib `tomllib` on
+  Python 3.11+, bundled mini-parser on 3.9/3.10) with proxy and pricing
+  overrides; env vars still win.
+- **Dashboard & exports** — Cloud Cost Avoidance card, Local vs Cloud donut,
+  local model breakdown, Provider filter (All/Cloud/Local), Local Inference
+  sections in Markdown/PDF and `local_models.csv`.
+- **Provider-aware analytics** — `provider_id` is now used in aggregation
+  (`global_overview.local_inference`) and displayed per event.
+
+### Fixed
+
+- Local events no longer get charged fabricated fallback cloud pricing
+  (`$2/$6 per 1M tokens`).
+
 ## [0.2.0] - 2026-08-06
 
 ### Added

@@ -36,6 +36,13 @@ augmentary sources that TokStat imports read-only — never a dependency.
 - **Native daemon** — `tokstat daemon start|stop|status` runs collectors +
   ingestion server in the background; `--watch` gives live browser updates.
 - **Exports** — PDF, JSON, Markdown and CSV reports.
+- **Local model support** — a stdlib-only transparent proxy
+  (`tokstat proxy start`) sits in front of Ollama / llama.cpp / vLLM / LM
+  Studio and records **real token usage** from their responses, with
+  `cost_usd = 0.0` and a **Cloud Cost Avoidance** estimate of what those
+  tokens would have cost via an API. Point any OpenAI-compatible or
+  Ollama-native client at `http://127.0.0.1:11435` and telemetry is captured
+  automatically.
 
 ## Installation
 
@@ -94,6 +101,17 @@ tokstat daemon start
 tokstat daemon status
 tokstat daemon stop
 
+# Local model proxy: capture usage from Ollama / llama.cpp / vLLM / LM Studio.
+tokstat proxy start                # default upstream http://localhost:11434
+tokstat proxy start --upstream http://localhost:8080 --port 11435
+# Point your OpenAI-compatible client (or OLLAMA_HOST) at http://127.0.0.1:11435
+# and real token usage flows into the dashboard automatically.
+tokstat proxy status
+tokstat proxy stop
+
+# Or run the proxy inside the daemon: enable `[proxy]` in ~/.tokstat/config.toml
+# (see the config example below), then `tokstat daemon start` runs both.
+
 # Live watch mode with browser updates:
 tokstat --watch --port 5000
 
@@ -122,10 +140,33 @@ make release-check   # build + twine check
 | GitHub Copilot (`~/.copilot/session-store.db`) | Estimated (char-length heuristic) | `estimated` |
 | Cursor / VS Code (`state.vscdb`) | Usually none exposed | — use ingestion endpoint |
 | Custom hooks / proxies | Real | `POST /v1/events` |
+| Ollama / llama.cpp / vLLM / LM Studio (via proxy) | Real (`usage` / `prompt_eval_count`) | `ok` |
+| Remote GPU (SSH tunnel or direct https + proxy) | Real | `ok` |
 | OpenUsage / tokentop DBs (optional) | Imported history + balance snapshots | read-only |
 
 The dashboard marks estimated events so you always know which numbers are
 measurements and which are approximations.
+
+### Local model configuration (`~/.tokstat/config.toml`)
+
+Optional; TokStat works with zero configuration. When present, it is merged
+over defaults (environment variables still win):
+
+```toml
+[proxy]
+enabled = false            # set true to run the proxy inside `tokstat daemon`
+upstream = "http://localhost:11434"   # Ollama default; any OpenAI-compat / Ollama server
+listen_port = 11435
+agent_name = "ollama_proxy"
+provider_id = "local"
+
+# Optional: approximate cloud-equivalent pricing overrides (per 1M tokens).
+# Glob patterns override the built-in LOCAL_TO_CLOUD_MAP for the
+# Cloud Cost Avoidance estimate.
+[pricing.overrides]
+"llama*" = [0.0, 0.0]
+"qwen*" = [0.10, 0.40]
+```
 
 ### Self-reliant vs. augmentary mode
 
