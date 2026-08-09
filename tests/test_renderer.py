@@ -87,3 +87,51 @@ def test_dashboard_local_card_hidden_when_no_local_data(tmp_path):
     # The local inference row defaults to hidden via inline style
     assert 'id="local-inference-row" style="display: none;"' in html
     assert 'id="stat-cloud-avoidance">$0.0000</' in html
+    # The coverage-gap hint stays hidden when there is no gap
+    assert 'id="scope-gap-hint" style="display:none;"' in html
+
+
+def test_dashboard_scope_hint_shown_when_gap(tmp_path):
+    report = _report_with_local_data()
+    report["global_overview"]["coverage_gap_tokens"] = 5000
+    output = tmp_path / "dashboard.html"
+    renderer.generate_html_report(report, output)
+
+    html = output.read_text(encoding="utf-8")
+    # Gap > 0 reveals the hint pointing at `tokstat sync`.
+    assert 'id="scope-gap-hint" style="display:block;"' in html
+    assert "tokstat sync" in html
+
+
+def test_dashboard_provider_filter_is_wired(tmp_path):
+    output = tmp_path / "dashboard.html"
+    renderer.generate_html_report({}, output)
+
+    html = output.read_text(encoding="utf-8")
+    # applyFilters() must read the provider dropdown (regression: it was ignored)
+    assert "const provVal = document.getElementById('filter-provider').value;" in html
+    assert "activeFilters.provider = ['all', 'cloud', 'local'].includes(provVal) ? provVal : 'all';" in html
+    # clearAllFilters() must reset the provider dropdown too
+    assert "document.getElementById('filter-provider').value = 'all';" in html
+
+
+def test_dashboard_providers_tab_and_drilldown(tmp_path):
+    output = tmp_path / "dashboard.html"
+    renderer.generate_html_report({}, output)
+
+    html = output.read_text(encoding="utf-8")
+    assert 'id="view-providers"' in html
+    assert 'id="subview-providers-list"' in html
+    assert 'id="subview-provider-drilldown"' in html
+    assert "function renderProvidersList()" in html
+    assert "function renderProviderDrilldown(" in html
+    assert "function drilldownProvider(" in html
+    assert "function providerDisplayName(" in html
+    # Entry points: clickable donut segments and scope-card provider stat
+    assert "drilldownProvider(elements[0].index === 0 ? 'local' : 'cloud')" in html
+    assert "onclick=\"drilldownProvider('cloud')\"" in html
+    # Models table carries a clickable provider column
+    assert "<th>Provider</th>" in html
+    assert "provider-pill-js" in html
+    # Keyboard shortcut mapping covers the new tab
+    assert "'providers', 'time', 'git', 'export'" in html

@@ -387,10 +387,31 @@ def compute_analytics():
     # from OpenUsage, or a future native provider poller).
     balance_obs = db_access.fetch_balance_observations()
     if balance_obs:
-        obs_input = balance_obs.get('client_ide_input_tokens', 0) or balance_obs.get('provider_codex_input_tokens', 0)
-        obs_cached = balance_obs.get('client_ide_cached_tokens', 0)
-        obs_output = balance_obs.get('client_ide_output_tokens', 0) or balance_obs.get('provider_codex_output_tokens', 0)
-        obs_cost = balance_obs.get('all_time_api_cost', 0) or balance_obs.get('total_cost_usd', 0)
+        # client_ide_* (Anthropic) and provider_codex_* (OpenAI/Codex) are
+        # additive surface/provider categories: sum rather than OR so a user
+        # with both Claude Code and Codex gets the true cross-provider total
+        # (the native provider poller writes both; legacy OpenUsage data also
+        # reports both categories from a single provider).
+        obs_input = (
+            (balance_obs.get('client_ide_input_tokens', 0) or 0)
+            + (balance_obs.get('provider_codex_input_tokens', 0) or 0)
+        )
+        obs_cached = (
+            (balance_obs.get('client_ide_cached_tokens', 0) or 0)
+            + (balance_obs.get('provider_codex_cached_tokens', 0) or 0)
+        )
+        obs_output = (
+            (balance_obs.get('client_ide_output_tokens', 0) or 0)
+            + (balance_obs.get('provider_codex_output_tokens', 0) or 0)
+        )
+        # Unlike the *_tokens keys above, all_time_api_cost and total_cost_usd
+        # are ALIASES for the same all-time spend (legacy OpenUsage rows carry
+        # the identical value under both; the native poller writes the former).
+        # Take the max so the total is not double-counted.
+        obs_cost = max(
+            (balance_obs.get('all_time_api_cost', 0) or 0),
+            (balance_obs.get('total_cost_usd', 0) or 0),
+        )
 
         if obs_input > 0:
             total_input = max(total_input, int(obs_input))

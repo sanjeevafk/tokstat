@@ -24,6 +24,10 @@ augmentary sources that TokStat imports read-only — never a dependency.
   (Claude Code JSONL transcripts, Aider model stats, Gemini brain logs,
   Copilot session store) and an HTTP ingestion server (`/v1/events`) accepts
   events from IDE extensions, shell wrappers and proxies.
+- **Provider reconciliation** — opt-in `tokstat sync` pulls authoritative
+  all-time usage/cost totals from Anthropic and OpenAI (Codex), reconciles
+  them with the local event log, and surfaces the coverage gap in the
+  dashboard and exports. **Never runs automatically.**
 - **Native storage** — `~/.tokstat/telemetry.db` (SQLite, WAL mode) with an
   OpenUsage-compatible schema; time-window fingerprint dedup keeps events
   merge-safe across sources.
@@ -112,6 +116,13 @@ tokstat proxy stop
 # Or run the proxy inside the daemon: enable `[proxy]` in ~/.tokstat/config.toml
 # (see the config example below), then `tokstat daemon start` runs both.
 
+# Point Codex CLI at the proxy too: it honors a custom base URL.
+export OPENAI_BASE_URL=http://127.0.0.1:11435   # real per-turn usage, recorded
+
+# Opt-in authoritative provider totals (never automatic):
+tokstat sync                 # pull all-time usage/cost from Anthropic + OpenAI
+tokstat sync --lookback-days 90
+
 # Live watch mode with browser updates:
 tokstat --watch --port 5000
 
@@ -180,6 +191,33 @@ TOKSTAT_SYNC_LEGACY=0 tokstat
 
 `tokstat migrate` is an explicit command and always imports, regardless of the
 flag.
+
+### Authoritative provider sync (optional, opt-in)
+
+TokStat stays **local-first by default: the bare `tokstat` command and the
+daemon never make outbound calls.** `tokstat sync` is an explicit, opt-in way
+to close the accuracy gap for tools whose local logs TokStat can only estimate
+(Gemini, Copilot): it pulls **authoritative all-time totals** from the
+providers' usage APIs and reconciles them against the local event log
+(visible as the Provider Reported / Local Event Log / Not in Event Log scope
+card, plus a Provider Reconciliation section in exports).
+
+- Credentials are **discovered from existing local config only** —
+  `ANTHROPIC_ADMIN_KEY`/`ANTHROPIC_API_KEY` (env or `~/.claude/settings.json`)
+  and `OPENAI_API_KEY` / `~/.codex/auth.json` (OAuth tokens are refreshed
+  automatically when expired). Nothing is stored outside `~/.tokstat`.
+- A provider failure is isolated and reported; other providers still sync.
+- **Google Gemini** has no API-key usage endpoint (usage is exposed only via
+  Google Cloud Billing / Vertex), so it is skipped with a documented reason.
+- To run it on an interval inside the daemon, set `[sync] enabled = true`
+  below; the daemon then syncs at most every `interval_hours`.
+
+```toml
+[sync]
+enabled = false        # true => the daemon runs `tokstat sync` on an interval
+lookback_days = 365    # provider history window
+interval_hours = 6.0   # minimum time between daemon-triggered syncs
+```
 
 ## Privacy
 

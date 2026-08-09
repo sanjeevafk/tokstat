@@ -122,6 +122,16 @@ def export_markdown(report_data, path):
             md.append(f"- **Cloud Cost Avoidance:** ${li.get('cloud_cost_avoidance', 0):.4f}")
             md.append(f"- **Local Models:** {', '.join(li.get('models_used', [])) or 'N/A'}")
             md.append("")
+
+        # Provider reconciliation: only rendered when provider-reported totals
+        # exceed the local event log (i.e. usage from sources we can't read).
+        if (go.get("coverage_gap_tokens", 0) or 0) > 0:
+            md.append("## Provider Reconciliation")
+            md.append(f"- **Provider-Reported Tokens (all-time):** {format_tokens(go.get('provider_reported_tokens', 0))}")
+            md.append(f"- **Local Event Log Tokens:** {format_tokens(go.get('local_event_tokens', 0))}")
+            md.append(f"- **Not in Event Log (coverage gap):** {format_tokens(go.get('coverage_gap_tokens', 0))}")
+            md.append("- *Run `tokstat sync` to pull authoritative provider totals.*")
+            md.append("")
         
         md.append("## Repository Analytics")
         md.append("| Repository | Total Tokens | Requests | Sessions | Cache Ratio % | Commits | Branch |")
@@ -201,7 +211,17 @@ def export_pdf(report_data, path):
             pdf.cell(45, 6, clean_txt(m[2]), 0, 0)
             pdf.set_font('Helvetica', '', 9)
             pdf.cell(45, 6, clean_txt(m[3]), 0, 1)
-            
+
+        if (go.get("coverage_gap_tokens", 0) or 0) > 0:
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.cell(45, 6, 'Provider-Reported:', 0, 0)
+            pdf.set_font('Helvetica', '', 9)
+            pdf.cell(45, 6, clean_txt(format_tokens(go.get('provider_reported_tokens', 0))), 0, 0)
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.cell(45, 6, 'Not in Event Log:', 0, 0)
+            pdf.set_font('Helvetica', '', 9)
+            pdf.cell(45, 6, clean_txt(format_tokens(go.get('coverage_gap_tokens', 0))), 0, 1)
+
         li = go.get("local_inference") or {}
         if li.get("total_tokens"):
             pdf.ln(3)

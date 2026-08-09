@@ -11,6 +11,9 @@ Commands:
   tokstat migrate [--force]     import legacy OpenUsage/Tokentop DBs
   tokstat collect --once        run all collectors once
   tokstat daemon start|stop|status
+  tokstat sync [--lookback-days N]
+                                opt-in authoritative usage sync from
+                                Anthropic/OpenAI usage APIs (never automatic)
 """
 import argparse
 import http.server
@@ -234,6 +237,15 @@ def cmd_proxy(action, upstream=None, port=None, agent_name=None):
         print(json.dumps(proxy.proxy_daemon_status(), indent=2))
 
 
+def cmd_sync(lookback_days=None):
+    """One-shot authoritative provider usage sync (opt-in; never automatic)."""
+    from . import sync
+
+    result = sync.run_sync_once(lookback_days=lookback_days)
+    print(json.dumps(result, indent=2))
+    sys.exit(result.get("exit_code", 0))
+
+
 def _open_dashboard(path):
     """Best-effort open of the generated dashboard in the default browser."""
     url = "file://" + os.path.abspath(path)
@@ -308,6 +320,16 @@ def main():
         parser.add_argument("--agent-name", default=None, help="Telemetry agent_name")
         args = parser.parse_args(argv[1:])
         cmd_proxy(args.action, upstream=args.upstream, port=args.port, agent_name=args.agent_name)
+        return
+
+    if argv and argv[0] == "sync":
+        parser = argparse.ArgumentParser(prog="tokstat sync")
+        parser.add_argument(
+            "--lookback-days", type=int, default=None,
+            help="Provider history window in days (default: [sync] lookback_days, 365)",
+        )
+        args = parser.parse_args(argv[1:])
+        cmd_sync(lookback_days=args.lookback_days)
         return
 
     parser = argparse.ArgumentParser(description="AI Engineering Observatory - Developer Token Tracker")

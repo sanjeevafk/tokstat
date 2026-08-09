@@ -96,6 +96,18 @@ class TestCLISubcommands(unittest.TestCase):
             cli.main()
         cmd.assert_called_once_with("status")
 
+    @patch("tokstat.cli.cmd_sync")
+    def test_sync_subcommand(self, cmd):
+        with patch.object(sys, "argv", ["tokstat", "sync"]):
+            cli.main()
+        cmd.assert_called_once_with(lookback_days=None)
+
+    @patch("tokstat.cli.cmd_sync")
+    def test_sync_subcommand_with_lookback(self, cmd):
+        with patch.object(sys, "argv", ["tokstat", "sync", "--lookback-days", "90"]):
+            cli.main()
+        cmd.assert_called_once_with(lookback_days=90)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,7 +49,7 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/models":
             self._json({"object": "list", "data": [{"id": "llama3.1:8b"}]})
         else:
-            self._json({"error": "not found"}, status=404)
+            self._json({"error": "not found", "upstream": True}, status=404)
 
     def _json(self, payload, status=200):
         raw = json.dumps(payload).encode("utf-8")
@@ -136,8 +136,22 @@ class TestProxy(unittest.TestCase):
         finally:
             conn.close()
 
-    def _drain(self):
+    def _drain(self, expected=None, timeout=3.0):
+        """Collect telemetry events.
+
+        The proxy enqueues events asynchronously AFTER replying to the client
+        (telemetry must never block inference), so tests that expect events
+        must wait for them; pass ``expected=N`` to block until N events arrive.
+        Zero-event assertions keep the old non-blocking behavior.
+        """
         events = []
+        deadline = time.time() + timeout
+        if expected is not None:
+            while len(events) < expected and time.time() < deadline:
+                try:
+                    events.append(self.events.get(timeout=max(0.05, deadline - time.time())))
+                except queue.Empty:
+                    continue
         while True:
             try:
                 events.append(self.events.get_nowait())
@@ -153,7 +167,7 @@ class TestProxy(unittest.TestCase):
         body = json.loads(raw)
         self.assertEqual(body["usage"]["prompt_tokens"], 110)  # verbatim passthrough
 
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         ev = events[0]
         self.assertEqual(ev["input_tokens"], 110)
@@ -172,7 +186,7 @@ class TestProxy(unittest.TestCase):
             "model": "test-ollama", "messages": [{"role": "user", "content": "hi"}]},
         )
         self.assertEqual(status, 200)
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["input_tokens"], 110)
         self.assertEqual(events[0]["output_tokens"], 55)
@@ -187,7 +201,7 @@ class TestProxy(unittest.TestCase):
         self.assertIn(b"data: [DONE]", raw)  # client received the full stream
         self.assertIn(b"Hello", raw)
 
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["input_tokens"], 111)
         self.assertEqual(events[0]["output_tokens"], 10)
@@ -198,7 +212,7 @@ class TestProxy(unittest.TestCase):
             "messages": [{"role": "user", "content": "hi there"}]},
         )
         self.assertEqual(status, 200)
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         # input estimated from messages ("hi there" = 8 chars // 4 = 2)
         self.assertEqual(events[0]["input_tokens"], 2)
@@ -248,12 +262,88 @@ class TestProxy(unittest.TestCase):
             self._post("/v1/chat/completions", {
                 "model": model, "messages": [{"role": "user", "content": "hi"}]},
             )
-        events = self._drain()
+        events = self._drain(expected=2)
         self.assertEqual(len(events), 2)
         self.assertEqual(
             len({e["dedup_key"] for e in events}), 2,
             "each request must produce a distinct dedup key",
         )
+
+    def test_responses_api_usage_captured(self):
+        # Codex CLI / Responses API requests routed through the proxy must be
+        # captured like any other completion path.
+        status, _ctype, _raw = self._post("/v1/responses", {
+            "model": "test-responses", "input": "hello"},
+        )
+        self.assertEqual(status, 200)
+        events = self._drain(expected=1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["model_raw"], "test-responses")
+        self.assertEqual(events[0]["input_tokens"], 110)
+        self.assertEqual(events[0]["output_tokens"], 55)
+
+    def test_unknown_path_forwarded_without_telemetry(self):
+        # Arbitrary upstream paths pass through verbatim (base-URL tools like
+        # Codex can hit non-completion endpoints); nothing is recorded.
+        status, _ctype, raw = self._post("/v1/other-endpoint", {
+            "model": "whatever", "messages": []},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)["model"], "whatever")
+        self.assertEqual(self._drain(), [])
+
+    def test_usage_from_payload_responses_shapes(self):
+        from tokstat.proxy import ProxyHandler
+
+        # Non-streaming /v1/responses: top-level usage with input/output tokens.
+        u = ProxyHandler._usage_from_payload(
+            {"usage": {"input_tokens": 7, "output_tokens": 3}}, "/v1/responses"
+        )
+        self.assertEqual(u, {"input": 7, "output": 3})
+        # Streaming final chunk nests usage under "response".
+        u2 = ProxyHandler._usage_from_payload(
+            {"type": "response.completed",
+             "response": {"usage": {"input_tokens": 9, "output_tokens": 2}}},
+            "/v1/responses",
+        )
+        self.assertEqual(u2, {"input": 9, "output": 2})
+
+    def test_content_length_counts_responses_delta(self):
+        from tokstat.proxy import ProxyHandler
+
+        # Streaming chunks carry text in `delta`; used for the estimate fallback.
+        self.assertEqual(
+            ProxyHandler._content_length({"delta": "hello"}, "/v1/responses"), 5
+        )
+        self.assertEqual(
+            ProxyHandler._content_length({"output_text": "hi"}, "/v1/responses"), 2
+        )
+
+    def test_passthrough_requires_content_length(self):
+        # Chunked (Transfer-Encoding) request bodies cannot be re-read safely;
+        # reject with 411 rather than forward an empty body upstream.
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", self.proxy.port, timeout=10)
+        try:
+            conn.putrequest("POST", "/v1/other")
+            conn.putheader("Transfer-Encoding", "chunked")
+            conn.endheaders()
+            conn.send(b"5\r\nhello\r\n0\r\n\r\n")
+            resp = conn.getresponse()
+            status = resp.status
+            resp.read()
+        finally:
+            conn.close()
+        self.assertEqual(status, 411)
+        self.assertEqual(self._drain(), [])
+
+    def test_unknown_get_path_forwarded(self):
+        # GET passthrough is symmetric with POST: the upstream's 404 is
+        # forwarded verbatim, not replaced by a proxy-generated one.
+        status, raw = self._get("/v1/other")
+        self.assertEqual(status, 404)
+        self.assertTrue(json.loads(raw)["upstream"])
 
 
 class TestProxyStatus(unittest.TestCase):

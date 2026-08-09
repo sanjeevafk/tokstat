@@ -12,4 +12,4 @@ tokstat_dashboard.html
 ref/
 reports/
 # Internal planning docs - never published
-docs/openusage_independence_plan.md
+docs/*_plan*.md

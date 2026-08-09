@@ -4,6 +4,36 @@ All notable changes to **tokstat-observatory** (CLI: `tokstat`) are documented
 here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- **Provider sync (`tokstat sync`)** — opt-in, never-automatic authoritative
+  usage/cost totals from the Anthropic (Claude Code) and OpenAI (Codex CLI)
+  usage APIs, written into `balance_observations` with the existing metric-key
+  vocabulary so analytics reconciles them unchanged. Credentials are
+  discovered from local config only (`ANTHROPIC_ADMIN_KEY` env or
+  `~/.claude/settings.json`; `OPENAI_API_KEY` or `~/.codex/auth.json` with
+  automatic OAuth token refresh). Google Gemini is skipped with a documented
+  reason (no API-key usage endpoint exists). A provider failure is isolated;
+  the exit code is non-zero only when every attempted provider failed.
+- **Daemon integration** — `[sync] enabled = true` in `config.toml` makes the
+  daemon run the poller on an interval (`interval_hours`, default 6h),
+  interval-guarded via `collector_state`. The bare `tokstat` command and the
+  daemon default still make **zero outbound calls**.
+- **Additive reconciliation** — `client_ide_*` (Anthropic) and
+  `provider_codex_*` (OpenAI/Codex) balance observations now sum instead of
+  OR, so a user with both Claude Code and Codex gets the true cross-provider
+  total (legacy single-provider behavior unchanged).
+- **Proxy passthrough** — the transparent proxy now forwards arbitrary
+  upstream POST paths verbatim (no telemetry), so base-URL tools such as
+  Codex (`OPENAI_BASE_URL=http://127.0.0.1:11435`) can be captured; the
+  `/v1/responses` path is a first-class telemetry path with real
+  `input_tokens`/`output_tokens` capture (streaming and non-streaming).
+- **Coverage gap UI** — the scope card now shows a hint pointing at
+  `tokstat sync` when provider-reported totals exceed the local event log,
+  and Markdown/PDF exports gain a Provider Reconciliation section.
+
 ## [0.3.0] - 2026-08-09
 
 ### Added
