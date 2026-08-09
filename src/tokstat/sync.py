@@ -4,11 +4,11 @@
 `tokstat sync` pulls authoritative all-time token/cost totals from the
 providers' usage APIs and writes them into balance_observations using the
 metric-key vocabulary that analytics.compute_analytics() already reconciles
-(see docs/hybrid_sync_plan.md). This closes the accuracy gap for tools whose
-local logs TokStat can only estimate, without giving up the local-first
-default.
+(see the "Provider Sync" section of README.md). This closes the accuracy gap
+for tools whose local logs TokStat can only estimate, without giving up the
+local-first default.
 
-Contract (non-negotiable, mirrored in docs/hybrid_sync_plan.md):
+Contract (non-negotiable):
   * No outbound by default. Runs only on explicit `tokstat sync`, or when the
     daemon has [sync] enabled = true (interval-guarded via collector_state).
   * Credentials are discovered from existing local config; nothing is stored

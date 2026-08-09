@@ -201,7 +201,7 @@ def sync_settings() -> dict:
     the daemon run it on an interval; lookback_days is the provider history
     window; interval_hours is the minimum time between daemon-triggered runs.
     The bare `tokstat` command and the daemon default make NO outbound calls
-    unless enabled here (see docs/hybrid_sync_plan.md).
+    unless enabled here (see the "Provider Sync" section of README.md).
     """
     cfg = load_config().get("sync") or {}
     env_enabled = os.environ.get("TOKSTAT_SYNC_ENABLED")
