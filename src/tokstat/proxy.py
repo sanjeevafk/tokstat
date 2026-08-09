@@ -33,12 +33,14 @@ from .collectors.base import now_iso
 
 OPENAI_CHAT_PATH = "/v1/chat/completions"
 OPENAI_COMPLETIONS_PATH = "/v1/completions"
+OPENAI_RESPONSES_PATH = "/v1/responses"  # Codex CLI / Responses API
 OLLAMA_CHAT_PATH = "/api/chat"
 OLLAMA_GENERATE_PATH = "/api/generate"
 
 _TELEMETRY_PATHS = {
     OPENAI_CHAT_PATH,
     OPENAI_COMPLETIONS_PATH,
+    OPENAI_RESPONSES_PATH,
     OLLAMA_CHAT_PATH,
     OLLAMA_GENERATE_PATH,
 }
@@ -135,10 +137,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             return {"input": 0, "output": 0}
         usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            # Responses API SSE final chunk nests usage under "response".
+            resp = payload.get("response")
+            if isinstance(resp, dict):
+                usage = resp.get("usage")
         if isinstance(usage, dict):
             return {
-                "input": int(usage.get("prompt_tokens") or 0),
-                "output": int(usage.get("completion_tokens") or 0),
+                "input": int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0),
+                "output": int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
             }
         if path in (OLLAMA_CHAT_PATH, OLLAMA_GENERATE_PATH):
             return {
@@ -166,6 +173,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         response = payload.get("response")  # Ollama /api/generate
         if isinstance(response, str):
             total += len(response)
+        if isinstance(payload.get("output_text"), str):  # Responses API
+            total += len(payload["output_text"])
         return total
 
     @staticmethod
@@ -333,9 +342,40 @@ class ProxyHandler(BaseHTTPRequestHandler):
             conn.close()
 
     # -- handlers ------------------------------------------------------------
+    def _forward_passthrough(self, path):
+        """Forward an arbitrary upstream POST verbatim, no telemetry.
+
+        Used for paths outside the telemetry set (e.g. Codex CLI pointed at the
+        proxy via OPENAI_BASE_URL hitting non-completion endpoints): the
+        request and response pass through untouched and nothing is recorded.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            raw_body = self.rfile.read(length)
+        except (ValueError, OSError):
+            self._safe_reply_error(400, "bad request body")
+            return
+        try:
+            conn = self._connect()
+        except Exception as exc:
+            self._safe_reply_error(502, f"upstream unavailable: {exc}")
+            return
+        try:
+            conn.request("POST", path, body=raw_body, headers=self._forward_headers())
+            resp = conn.getresponse()
+            self._reply_raw(
+                resp.status,
+                resp.getheader("Content-Type") or "application/json",
+                resp.read(),
+            )
+        except (http.client.HTTPException, OSError) as exc:
+            self._safe_reply_error(502, f"upstream request failed: {exc}")
+        finally:
+            conn.close()
+
     def do_POST(self):
         if self.path not in _TELEMETRY_PATHS:
-            self._send_json(404, {"error": f"unsupported path {self.path}"})
+            self._forward_passthrough(self.path)
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)

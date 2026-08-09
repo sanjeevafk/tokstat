@@ -255,6 +255,45 @@ class TestProxy(unittest.TestCase):
             "each request must produce a distinct dedup key",
         )
 
+    def test_responses_api_usage_captured(self):
+        # Codex CLI / Responses API requests routed through the proxy must be
+        # captured like any other completion path.
+        status, _ctype, _raw = self._post("/v1/responses", {
+            "model": "test-responses", "input": "hello"},
+        )
+        self.assertEqual(status, 200)
+        events = self._drain()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["model_raw"], "test-responses")
+        self.assertEqual(events[0]["input_tokens"], 110)
+        self.assertEqual(events[0]["output_tokens"], 55)
+
+    def test_unknown_path_forwarded_without_telemetry(self):
+        # Arbitrary upstream paths pass through verbatim (base-URL tools like
+        # Codex can hit non-completion endpoints); nothing is recorded.
+        status, _ctype, raw = self._post("/v1/other-endpoint", {
+            "model": "whatever", "messages": []},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)["model"], "whatever")
+        self.assertEqual(self._drain(), [])
+
+    def test_usage_from_payload_responses_shapes(self):
+        from tokstat.proxy import ProxyHandler
+
+        # Non-streaming /v1/responses: top-level usage with input/output tokens.
+        u = ProxyHandler._usage_from_payload(
+            {"usage": {"input_tokens": 7, "output_tokens": 3}}, "/v1/responses"
+        )
+        self.assertEqual(u, {"input": 7, "output": 3})
+        # Streaming final chunk nests usage under "response".
+        u2 = ProxyHandler._usage_from_payload(
+            {"type": "response.completed",
+             "response": {"usage": {"input_tokens": 9, "output_tokens": 2}}},
+            "/v1/responses",
+        )
+        self.assertEqual(u2, {"input": 9, "output": 2})
+
 
 class TestProxyStatus(unittest.TestCase):
     """proxy_daemon_status() must cover both hosting modes."""
