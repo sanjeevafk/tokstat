@@ -400,7 +400,9 @@ class TestSyncWriteAndReconcile(unittest.TestCase):
         self.assertEqual(go["provider_reported_input"], 8000)
         self.assertEqual(go["provider_reported_output"], 3000)
         self.assertEqual(go["provider_reported_tokens"], 11000)
-        self.assertEqual(go["estimated_cost"], 4.0)
+        # all_time_api_cost / total_cost_usd are aliases for the same all-time
+        # spend, so reconciliation takes the max rather than double-counting.
+        self.assertEqual(go["estimated_cost"], 2.5)
 
     def test_single_provider_legacy_semantics_preserved(self):
         # A lone client_ide_* observation behaves exactly as before the sum change.

@@ -404,9 +404,13 @@ def compute_analytics():
             (balance_obs.get('client_ide_output_tokens', 0) or 0)
             + (balance_obs.get('provider_codex_output_tokens', 0) or 0)
         )
-        obs_cost = (
-            (balance_obs.get('all_time_api_cost', 0) or 0)
-            + (balance_obs.get('total_cost_usd', 0) or 0)
+        # Unlike the *_tokens keys above, all_time_api_cost and total_cost_usd
+        # are ALIASES for the same all-time spend (legacy OpenUsage rows carry
+        # the identical value under both; the native poller writes the former).
+        # Take the max so the total is not double-counted.
+        obs_cost = max(
+            (balance_obs.get('all_time_api_cost', 0) or 0),
+            (balance_obs.get('total_cost_usd', 0) or 0),
         )
 
         if obs_input > 0:
