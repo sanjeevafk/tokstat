@@ -19,6 +19,9 @@ read-only.
 graph TD
     A["tokstat CLI / daemon (cli.py / daemon.py)"] -->|bootstrap + collect| B["collectors/ package"]
     C["IDE extensions / hooks / proxies"] -->|HTTP POST /v1/events| D["server.py (ingestion, 127.0.0.1)"]
+    L["OpenAI-compat / Ollama client"] -->|OpenAI-compat HTTP| M["proxy.py (transparent, 127.0.0.1:11435)"]
+    M -->|transparent forward| N["Ollama / llama.cpp / vLLM / LM Studio"]
+    M -->|shared queue or POST /v1/events| D
     E["Legacy OpenUsage + Tokentop DBs (optional)"] -->|read-only sync| B
     B -->|WAL writes| F["Native DB ~/.tokstat/telemetry.db"]
     D -->|batching writer| F
@@ -39,10 +42,11 @@ graph TD
 | **`migration.py`** | [`src/tokstat/migration.py`](../src/tokstat/migration.py) | Native schema bootstrap (`ensure_schema`) and read-only, idempotent importers for OpenUsage (`migrate_openusage`) and Tokentop (`migrate_tokentop`) with 10-second fingerprint cross-source dedup. |
 | **`collectors/`** | [`src/tokstat/collectors/`](../src/tokstat/collectors/) | Embedded scrapers: `legacy_sync` (optional augmentary), `claude_code` (real usage), `aider` (real), `gemini_antigravity` (estimated), `copilot` (estimated), `vscode_cursor` (spike). All extend `BaseCollector` and persist bookmarks in `collector_state`. |
 | **`server.py`** | [`src/tokstat/server.py`](../src/tokstat/server.py) | Stdlib HTTP ingestion server bound to `127.0.0.1`: `POST /v1/events` (single/batch), `POST /v1/telemetry` (alias), `GET /health`. A single batching writer thread (1s / 50 events) is the only DB writer. |
-| **`daemon.py`** | [`src/tokstat/daemon.py`](../src/tokstat/daemon.py) | Background daemon: PID file, SIGTERM/SIGINT graceful shutdown with queue drain, collector loop with backoff, ingestion server thread. |
+| **`daemon.py`** | [`src/tokstat/daemon.py`](../src/tokstat/daemon.py) | Background daemon: PID file, SIGTERM/SIGINT graceful shutdown with queue drain, collector loop with backoff, ingestion server thread, and an optional local-model proxy thread (enabled via `[proxy] enabled = true` in config.toml) sharing the ingestion queue. |
+| **`proxy.py`** | [`src/tokstat/proxy.py`](../src/tokstat/proxy.py) | Stdlib transparent proxy (127.0.0.1:11435) forwarding OpenAI-compatible (`/v1/chat/completions`, `/v1/completions`) and Ollama-native (`/api/chat`, `/api/generate`) requests upstream; relays SSE streams chunk-by-chunk, extracts real usage (`usage` or `prompt_eval_count`/`eval_count`) and emits zero-cost `provider_id="local"` events. Also provides the standalone `tokstat proxy start|stop|status` lifecycle. |
 | **`db_access.py`** | [`src/tokstat/db_access.py`](../src/tokstat/db_access.py) | Database read layer for the native DB (events, daily rollup, projects, sessions, tool totals, balance observations) plus the legacy tokentop/copilot read helpers reused by collectors. |
 | **`queries.py`** | [`src/tokstat/queries.py`](../src/tokstat/queries.py) | Centralized repository of parameterized SQL queries (`QUERY_ALL_EVENTS`, `QUERY_DAILY_ROLLUP`, `QUERY_PROJECTS_BREAKDOWN`, `QUERY_SESSIONS_BREAKDOWN`, `QUERY_TOOL_TOTALS`). |
-| **`analytics.py`** | [`src/tokstat/analytics.py`](../src/tokstat/analytics.py) | Core analytical engine: metrics aggregations, GitHub-style heatmaps, session durations, uninterrupted coding sprints, productivity ratios, and balance reconciliation. |
+| **`analytics.py`** | [`src/tokstat/analytics.py`](../src/tokstat/analytics.py) | Core analytical engine: metrics aggregations, GitHub-style heatmaps, session durations, uninterrupted coding sprints, productivity ratios, balance reconciliation, and the `global_overview.local_inference` summary (local tokens + cloud cost avoidance). |
 | **`renderer.py`** | [`src/tokstat/renderer.py`](../src/tokstat/renderer.py) | Dashboard generator emitting a self-contained, offline-capable HTML/CSS/JS file with Chart.js charts, interactive model highlighting, global search, and keyboard shortcuts. |
 | **`exporter.py`** | [`src/tokstat/exporter.py`](../src/tokstat/exporter.py) | Multi-format export engine producing PDF (via FPDF2), Markdown, JSON, and CSV reports. |
 | **`utils.py`** | [`src/tokstat/utils.py`](../src/tokstat/utils.py) | Utility functions for local Git repository commit scraping, usage-window commit correlation, and model cost/savings estimates. |
@@ -207,6 +211,26 @@ tokstat daemon start       # collectors + ingestion server on 127.0.0.1:5000
 tokstat daemon status
 tokstat daemon stop
 ```
+If `[proxy] enabled = true` is set in `~/.tokstat/config.toml`, the daemon also
+starts the local-model proxy, sharing its ingestion queue (single-writer DB
+pattern preserved).
+
+### Local Model Proxy
+```bash
+tokstat proxy start                        # default upstream http://localhost:11434
+tokstat proxy start --upstream http://127.0.0.1:8080 --port 11435
+tokstat proxy status
+tokstat proxy stop
+```
+The proxy is a stdlib-only transparent relay: clients keep using standard
+OpenAI-compatible / Ollama HTTP against `http://127.0.0.1:11435`. Responses
+(including SSE streams) pass through verbatim; the final chunk's `usage`
+(OpenAI-compat) or `prompt_eval_count`/`eval_count` (Ollama-native) is captured
+into a `provider_id="local"` event with `cost_usd = 0.0`. When a server omits
+counts, tokens are estimated deterministically (content chars / 4) and the
+Cloud Cost Avoidance figure maps local models to their closest cloud
+equivalent via `utils.LOCAL_TO_CLOUD_MAP` (overridable with
+`[pricing.overrides]` in config.toml).
 
 ### Live Sync Watch Mode
 ```bash

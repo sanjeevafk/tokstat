@@ -131,7 +131,8 @@ def compute_git_correlations(events_by_project):
             cost, savings = 0.0, 0.0
             for ev in matched_events:
                 c_val, s_val = utils.estimate_token_cost_and_savings(
-                    ev["model_raw"], ev["input_tokens"], ev["output_tokens"], ev["cache_read_tokens"]
+                    ev["model_raw"], ev["input_tokens"], ev["output_tokens"], ev["cache_read_tokens"],
+                    ev.get("provider_id")
                 )
                 cost += c_val
                 savings += s_val
@@ -171,14 +172,23 @@ def compute_analytics():
     def _est_cost_and_savings(e):
         return utils.estimate_token_cost_and_savings(
             e.get("model_raw"), e.get("input_tokens", 0), e.get("output_tokens", 0),
-            e.get("cache_read_tokens", 0))
+            e.get("cache_read_tokens", 0), e.get("provider_id"))
 
     # Preserve valid usage events that have no session; the browser needs these
     # for complete totals and filtering. `savings` rides along so the client's
     # KPI/tables use the same per-model pricing as exports (no hardcoded rate).
+    # `provider` + `cloud_avoidance` power the Local-vs-Cloud segmentation and
+    # the Cloud Cost Avoidance card.
     client_events = []
     for e in events:
         est_cost, est_savings = _est_cost_and_savings(e)
+        is_local = (e.get("provider_id") or "").lower() == "local"
+        if is_local:
+            _cloud_model, _cloud_cost = utils.estimate_cloud_equivalent_cost(
+                e.get("model_raw"), e.get("input_tokens", 0), e.get("output_tokens", 0),
+                e.get("cache_read_tokens", 0))
+        else:
+            _cloud_cost = 0.0
         client_events.append({
             "event_id": e.get("event_id"), "occurred_at": e.get("occurred_at"),
             "project": e.get("workspace_id") or "Global/No Project",
@@ -187,6 +197,8 @@ def compute_analytics():
             "tool": e.get("agent_name") or "Unknown", "input": e.get("input_tokens", 0),
             "output": e.get("output_tokens", 0), "cache_read": e.get("cache_read_tokens", 0),
             "total": e.get("total_tokens", 0), "requests": e.get("requests", 1),
+            "provider": e.get("provider_id") or "unknown",
+            "cloud_avoidance": _cloud_cost if is_local else 0.0,
             "cost": est_cost,
             "savings": est_savings
         })
@@ -235,7 +247,7 @@ def compute_analytics():
         model = utils.normalize_model_display_name(ev.get('model_raw'))
         agent = ev.get('agent_name') or 'Unknown'
         
-        cost, savings = utils.estimate_token_cost_and_savings(model, inp, out, cread)
+        cost, savings = utils.estimate_token_cost_and_savings(model, inp, out, cread, ev.get("provider_id"))
         
         norm_ev = {
             "event_id": ev.get("event_id"),
@@ -250,6 +262,7 @@ def compute_analytics():
             "cache_read_tokens": cread,
             "total_tokens": tot,
             "requests": reqs,
+            "provider_id": ev.get("provider_id"),
             "status": ev.get("status", "ok")
         }
 
@@ -312,6 +325,39 @@ def compute_analytics():
             monthly_tokens[month_str]["cache_read"] += cread
             monthly_tokens[month_str]["total"] += tot
             monthly_tokens[month_str]["cost"] += cost
+
+    # Local inference summary: on-premise usage captured through the proxy.
+    # cost_usd stays 0.0 for these events; cloud_cost_avoidance estimates what
+    # the same tokens would have cost via a cloud API (see LOCAL_TO_CLOUD_MAP).
+    local_events = [e for e in events if (e.get("provider_id") or "").lower() == "local"]
+    local_tokens = sum(e.get("total_tokens") or 0 for e in local_events)
+    local_input = sum(e.get("input_tokens") or 0 for e in local_events)
+    local_output = sum(e.get("output_tokens") or 0 for e in local_events)
+    local_requests = sum(e.get("requests") or 1 for e in local_events)
+    local_models_detail = collections.defaultdict(lambda: {"tokens": 0, "requests": 0})
+    for e in local_events:
+        nm = utils.normalize_model_display_name(e.get("model_raw"))
+        local_models_detail[nm]["tokens"] += e.get("total_tokens") or 0
+        local_models_detail[nm]["requests"] += e.get("requests") or 1
+    local_avoidance = sum(
+        utils.estimate_cloud_equivalent_cost(
+            e.get("model_raw"), e.get("input_tokens") or 0, e.get("output_tokens") or 0,
+            e.get("cache_read_tokens") or 0)[1]
+        for e in local_events
+    )
+    local_inference = {
+        "total_tokens": local_tokens,
+        "total_input": local_input,
+        "total_output": local_output,
+        "total_events": len(local_events),
+        "requests": local_requests,
+        "cloud_cost_avoidance": local_avoidance,
+        "models_used": sorted(local_models_detail.keys()),
+        "models_detail": [
+            {"model": m, "tokens": d["tokens"], "requests": d["requests"]}
+            for m, d in sorted(local_models_detail.items(), key=lambda kv: -kv[1]["tokens"])
+        ],
+    }
 
     # Add Copilot standalone details to overall totals
     cop_in, cop_out, cop_tot, cop_req = copilot_totals
@@ -383,7 +429,8 @@ def compute_analytics():
         
         for idx, e in enumerate(sorted(s_events, key=lambda x: x['occurred_at'] or '')):
             e_cost, e_savings = utils.estimate_token_cost_and_savings(
-                e['model_raw'], e['input_tokens'], e['output_tokens'], e['cache_read_tokens']
+                e['model_raw'], e['input_tokens'], e['output_tokens'], e['cache_read_tokens'],
+                e.get('provider_id')
             )
             s_cost += e_cost
             s_savings += e_savings
@@ -518,7 +565,8 @@ def compute_analytics():
         m_cost, m_savings = 0.0, 0.0
         for e in m_events:
             c_val, s_val = utils.estimate_token_cost_and_savings(
-                e['model_raw'], e['input_tokens'], e['output_tokens'], e['cache_read_tokens']
+                e['model_raw'], e['input_tokens'], e['output_tokens'], e['cache_read_tokens'],
+                e.get('provider_id')
             )
             m_cost += c_val
             m_savings += s_val
@@ -632,7 +680,11 @@ def compute_analytics():
             "claude_code": "Claude Code",
             "cursor": "Cursor IDE",
             "cursor-composer": "Cursor Composer",
-            "provider_poller": "Provider Poller System"
+            "provider_poller": "Provider Poller System",
+            "ollama_proxy": "Ollama (Local)",
+            "llamacpp_proxy": "llama.cpp (Local)",
+            "vllm_proxy": "vLLM (Local/Remote)",
+            "local_inference": "Local Inference"
         }
         disp_name = display_map.get(agent_name, agent_name.replace("_", " ").title())
         
@@ -751,6 +803,7 @@ def compute_analytics():
             "provider_reported_output": total_output,
             "provider_reported_cached_tokens": total_cache_read,
             "coverage_gap_tokens": max(0, total_tokens - local_event_totals["tokens"]),
+            "local_inference": local_inference,
         },
         "repositories": repositories_list,
         "sessions": sessions_list,

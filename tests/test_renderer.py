@@ -35,3 +35,55 @@ def test_dashboard_contains_safe_dynamic_rendering_helpers(tmp_path):
     assert "switchTab('repositories', { preserveDrilldown: true })" in html
     assert "switchTab('sessions', { preserveDrilldown: true })" in html
     assert '<div class="metric-value">${formatNumber(t.total_tokens)}</div>' in html
+
+
+def _report_with_local_data():
+    return {
+        "global_overview": {
+            "total_tokens": 6000,
+            "estimated_cost": 1.5,
+            "estimated_savings": 0.1,
+            "provider_reported_tokens": 6000,
+            "local_event_tokens": 6000,
+            "coverage_gap_tokens": 0,
+            "local_inference": {
+                "total_tokens": 4500,
+                "requests": 3,
+                "cloud_cost_avoidance": 1.25,
+                "models_used": ["llama3.1:8b"],
+                "models_detail": [{"model": "llama3.1:8b", "tokens": 4500, "requests": 3}],
+            },
+        },
+        "repositories": [],
+        "sessions": [],
+        "events": [{"project": "p", "provider": "local"}],
+        "models": [],
+        "tools": [],
+        "time_analytics": {},
+        "productivity_metrics": {},
+        "git_integration": {"correlated_commits": [], "repos_git_info": {}},
+    }
+
+
+def test_dashboard_renders_local_model_sections(tmp_path):
+    output = tmp_path / "dashboard.html"
+    renderer.generate_html_report(_report_with_local_data(), output)
+
+    html = output.read_text(encoding="utf-8")
+    assert "Cloud Cost Avoidance" in html
+    assert "id=\"local-inference-row\"" in html
+    assert "id=\"localCloudChartOverview\"" in html
+    assert "id=\"filter-provider\"" in html
+    # Initial (server-rendered) values must be present, not zero placeholders
+    assert 'id="stat-cloud-avoidance">$1.2500</' in html
+    assert 'id="stat-local-tokens">4.5k</' in html
+
+
+def test_dashboard_local_card_hidden_when_no_local_data(tmp_path):
+    output = tmp_path / "dashboard.html"
+    renderer.generate_html_report({}, output)
+
+    html = output.read_text(encoding="utf-8")
+    # The local inference row defaults to hidden via inline style
+    assert 'id="local-inference-row" style="display: none;"' in html
+    assert 'id="stat-cloud-avoidance">$0.0000</' in html

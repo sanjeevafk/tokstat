@@ -8,7 +8,8 @@ PYTHON ?= python3
 PIP := $(PYTHON) -m pip
 
 .PHONY: help install dev test lint format check run watch collect migrate \
-        daemon-start daemon-stop daemon-status build release-check publish clean
+        daemon-start daemon-stop daemon-status proxy proxy-start proxy-stop proxy-status \
+        build release-check publish clean
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -51,6 +52,17 @@ daemon-stop: ## Stop the background daemon
 
 daemon-status: ## Show daemon + collector status
 	$(PYTHON) -m tokstat.cli daemon status
+
+proxy: proxy-start ## Alias for proxy-start (local-model proxy)
+
+proxy-start: ## Start the local-model proxy (default upstream http://localhost:11434)
+	$(PYTHON) -m tokstat.cli proxy start
+
+proxy-stop: ## Stop the local-model proxy
+	$(PYTHON) -m tokstat.cli proxy stop
+
+proxy-status: ## Show proxy status
+	$(PYTHON) -m tokstat.cli proxy status
 
 build: ## Build sdist + wheel into dist/
 	rm -rf build dist

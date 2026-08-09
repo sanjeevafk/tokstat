@@ -145,6 +145,30 @@ def run_foreground() -> None:
     _logger.info("daemon started pid=%s ingest_port=%s", os.getpid(), ingest.port)
     print(f"[daemon] foreground: ingestion server on {ingest.host}:{ingest.port}")
 
+    # Optional local-model proxy: enabled via [proxy] enabled = true in
+    # ~/.tokstat/config.toml. Shares the ingestion queue for zero-overhead
+    # telemetry recording (single-writer DB pattern preserved).
+    proxy_srv = None
+    proxy_settings = config.proxy_settings()
+    if proxy_settings["enabled"]:
+        try:
+            from . import proxy as proxy_mod
+
+            proxy_srv = proxy_mod.ProxyServer(
+                upstream=proxy_settings["upstream"],
+                listen_port=proxy_settings["listen_port"],
+                agent_name=proxy_settings["agent_name"],
+                ingest_queue=ingest.ingestion_queue,
+            )
+            proxy_srv.start()
+            _logger.info(
+                "proxy started on port %s -> %s", proxy_srv.port, proxy_srv.upstream
+            )
+            print(f"[daemon] proxy listening on 127.0.0.1:{proxy_srv.port}")
+        except Exception as exc:
+            _logger.error("proxy failed to start: %s", exc)
+            print(f"[daemon] proxy failed to start: {exc}", file=sys.stderr)
+
     backoff = config.COLLECTOR_BACKOFF_MIN_SEC
     try:
         while not stop_event.is_set():
@@ -168,6 +192,8 @@ def run_foreground() -> None:
             stop_event.wait(wait_sec)
     finally:
         ingest.stop()  # drains the ingestion queue
+        if proxy_srv:
+            proxy_srv.stop()
         _logger.info("daemon stopped")
         try:
             os.remove(config.DAEMON_PID_PATH)
