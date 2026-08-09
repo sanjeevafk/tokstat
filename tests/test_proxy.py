@@ -136,8 +136,22 @@ class TestProxy(unittest.TestCase):
         finally:
             conn.close()
 
-    def _drain(self):
+    def _drain(self, expected=None, timeout=3.0):
+        """Collect telemetry events.
+
+        The proxy enqueues events asynchronously AFTER replying to the client
+        (telemetry must never block inference), so tests that expect events
+        must wait for them; pass ``expected=N`` to block until N events arrive.
+        Zero-event assertions keep the old non-blocking behavior.
+        """
         events = []
+        deadline = time.time() + timeout
+        if expected is not None:
+            while len(events) < expected and time.time() < deadline:
+                try:
+                    events.append(self.events.get(timeout=max(0.05, deadline - time.time())))
+                except queue.Empty:
+                    continue
         while True:
             try:
                 events.append(self.events.get_nowait())
@@ -153,7 +167,7 @@ class TestProxy(unittest.TestCase):
         body = json.loads(raw)
         self.assertEqual(body["usage"]["prompt_tokens"], 110)  # verbatim passthrough
 
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         ev = events[0]
         self.assertEqual(ev["input_tokens"], 110)
@@ -172,7 +186,7 @@ class TestProxy(unittest.TestCase):
             "model": "test-ollama", "messages": [{"role": "user", "content": "hi"}]},
         )
         self.assertEqual(status, 200)
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["input_tokens"], 110)
         self.assertEqual(events[0]["output_tokens"], 55)
@@ -187,7 +201,7 @@ class TestProxy(unittest.TestCase):
         self.assertIn(b"data: [DONE]", raw)  # client received the full stream
         self.assertIn(b"Hello", raw)
 
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["input_tokens"], 111)
         self.assertEqual(events[0]["output_tokens"], 10)
@@ -198,7 +212,7 @@ class TestProxy(unittest.TestCase):
             "messages": [{"role": "user", "content": "hi there"}]},
         )
         self.assertEqual(status, 200)
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         # input estimated from messages ("hi there" = 8 chars // 4 = 2)
         self.assertEqual(events[0]["input_tokens"], 2)
@@ -248,7 +262,7 @@ class TestProxy(unittest.TestCase):
             self._post("/v1/chat/completions", {
                 "model": model, "messages": [{"role": "user", "content": "hi"}]},
             )
-        events = self._drain()
+        events = self._drain(expected=2)
         self.assertEqual(len(events), 2)
         self.assertEqual(
             len({e["dedup_key"] for e in events}), 2,
@@ -262,7 +276,7 @@ class TestProxy(unittest.TestCase):
             "model": "test-responses", "input": "hello"},
         )
         self.assertEqual(status, 200)
-        events = self._drain()
+        events = self._drain(expected=1)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["model_raw"], "test-responses")
         self.assertEqual(events[0]["input_tokens"], 110)
