@@ -1289,6 +1289,10 @@ def generate_html_report(report_data, output_path, watch_mode=False):
                     <div class="scope-stat"><small>PROVIDER REPORTED</small><b>__SCOPE_PROVIDER__</b></div>
                     <div class="scope-stat"><small>LOCAL EVENT LOG</small><b>__SCOPE_EVENTS__</b></div>
                     <div class="scope-stat scope-gap"><small>NOT IN EVENT LOG</small><b>__SCOPE_GAP__</b></div>
+                    <div class="scope-hint" id="scope-gap-hint" style="__SCOPE_HINT_STYLE__">
+                        Provider totals exceed the local event log. Run <code>tokstat sync</code> to pull
+                        authoritative all-time usage and cost from Anthropic and OpenAI.
+                    </div>
                 </div>
                 <div class="metrics-grid">
                     <!-- Stat cards -->
@@ -3942,6 +3946,9 @@ def generate_html_report(report_data, output_path, watch_mode=False):
     html_content = html_content.replace("__SCOPE_PROVIDER__", compact_number(overview.get("provider_reported_tokens", overview.get("total_tokens", 0))))
     html_content = html_content.replace("__SCOPE_EVENTS__", compact_number(overview.get("local_event_tokens", 0)))
     html_content = html_content.replace("__SCOPE_GAP__", compact_number(overview.get("coverage_gap_tokens", 0)))
+    gap = overview.get("coverage_gap_tokens", 0) or 0
+    hint_style = "display:block;" if gap > 0 else "display:none;"
+    html_content = html_content.replace("__SCOPE_HINT_STYLE__", hint_style)
     
     with open(output_path, "w", encoding='utf-8') as f:
         f.write(html_content)

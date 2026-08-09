@@ -87,3 +87,17 @@ def test_dashboard_local_card_hidden_when_no_local_data(tmp_path):
     # The local inference row defaults to hidden via inline style
     assert 'id="local-inference-row" style="display: none;"' in html
     assert 'id="stat-cloud-avoidance">$0.0000</' in html
+    # The coverage-gap hint stays hidden when there is no gap
+    assert 'id="scope-gap-hint" style="display:none;"' in html
+
+
+def test_dashboard_scope_hint_shown_when_gap(tmp_path):
+    report = _report_with_local_data()
+    report["global_overview"]["coverage_gap_tokens"] = 5000
+    output = tmp_path / "dashboard.html"
+    renderer.generate_html_report(report, output)
+
+    html = output.read_text(encoding="utf-8")
+    # Gap > 0 reveals the hint pointing at `tokstat sync`.
+    assert 'id="scope-gap-hint" style="display:block;"' in html
+    assert "tokstat sync" in html
