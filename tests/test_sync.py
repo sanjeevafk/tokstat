@@ -1,5 +1,6 @@
 # test_sync.py
 """Tests for the opt-in provider usage poller (src/tokstat/sync.py)."""
+import datetime
 import json
 import os
 import tempfile
@@ -117,6 +118,27 @@ class TestNormalizers(unittest.TestCase):
             norm, sync.KEY_INPUT, sync.KEY_OUTPUT, sync.KEY_CACHED, sync.KEY_COST_ANTHROPIC
         )
         self.assertEqual(metrics, {})
+
+    def test_anthropic_cost_report_ambiguous_amounts_not_counted(self):
+        # cost_report `amount` units are ambiguous (cents in some doc versions);
+        # only clearly-USD-named fields may contribute to cost.
+        cost = {
+            "data": [
+                {
+                    "results": [
+                        {"line_items": [{"amount": {"value": 12345, "currency": "usd"}}]},
+                        {"line_items": [{"amount": 6789}]},
+                    ]
+                }
+            ]
+        }
+        norm = sync._normalize_anthropic({}, cost)
+        self.assertEqual(norm["totals"]["cost"], 0.0)
+
+    def test_anthropic_cost_report_usd_fields_counted(self):
+        cost = {"data": [{"results": [{"total_cost_usd": "1.25"}, {"cost_usd": 0.5}]}]}
+        norm = sync._normalize_anthropic({}, cost)
+        self.assertEqual(norm["totals"]["cost"], 1.75)
 
     def test_sanitize_model(self):
         self.assertEqual(sync._sanitize_model("gpt-5.1-codex"), "gpt_5_1_codex")
@@ -244,6 +266,41 @@ class TestOAuthRefresh(unittest.TestCase):
         with patch.object(sync, "_oauth_refresh") as refresh:
             with self.assertRaises(sync.ProviderAuthError):
                 sync._fetch_openai_with_refresh(creds, 30)
+        refresh.assert_not_called()
+
+    def test_openai_proactive_refresh_when_expired(self):
+        # expires_at in the past => refresh BEFORE the first API call.
+        past = datetime.datetime.now(datetime.timezone.utc).timestamp() - 100
+        creds = {
+            "type": "oauth",
+            "access_token": "stale",
+            "refresh_token": "rt-1",
+            "expires_at": past,
+        }
+        calls = {"n": 0}
+
+        def fake_fetch(c, lookback):
+            calls["n"] += 1
+            self.assertEqual(c["access_token"], "fresh")
+            return {"totals": {"input": 2.0, "output": 0.0, "cached": 0.0, "cost": 0.0}, "models": {}}
+
+        with patch.object(sync, "_fetch_openai", side_effect=fake_fetch), \
+             patch.object(sync, "_oauth_refresh", return_value="fresh") as refresh:
+            sync._fetch_openai_with_refresh(creds, 30)
+        refresh.assert_called_once_with("rt-1")
+        self.assertEqual(calls["n"], 1)  # no 401-triggered second attempt
+
+    def test_openai_valid_token_no_refresh(self):
+        future = datetime.datetime.now(datetime.timezone.utc).timestamp() + 3600
+        creds = {
+            "type": "oauth",
+            "access_token": "valid",
+            "refresh_token": "rt-1",
+            "expires_at": future,
+        }
+        with patch.object(sync, "_fetch_openai", return_value={"totals": {}, "models": {}}), \
+             patch.object(sync, "_oauth_refresh") as refresh:
+            sync._fetch_openai_with_refresh(creds, 30)
         refresh.assert_not_called()
 
     def test_oauth_refresh_parses_access_token(self):

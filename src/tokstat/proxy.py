@@ -175,6 +175,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             total += len(response)
         if isinstance(payload.get("output_text"), str):  # Responses API
             total += len(payload["output_text"])
+        delta = payload.get("delta")  # Responses API streamed text chunks
+        if isinstance(delta, str):
+            total += len(delta)
         return total
 
     @staticmethod
@@ -349,9 +352,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         proxy via OPENAI_BASE_URL hitting non-completion endpoints): the
         request and response pass through untouched and nothing is recorded.
         """
+        length_header = self.headers.get("Content-Length")
+        if length_header is None:
+            # Chunked (Transfer-Encoding) request bodies cannot be re-read
+            # safely with the stdlib handler; reject rather than forward an
+            # empty body upstream.
+            self._safe_reply_error(411, "Content-Length required")
+            return
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-            raw_body = self.rfile.read(length)
+            raw_body = self.rfile.read(int(length_header))
         except (ValueError, OSError):
             self._safe_reply_error(400, "bad request body")
             return
@@ -401,9 +410,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._emit_event(model, in_tok, out_tok)
 
     def do_GET(self):
-        if self.path not in _PASSTHROUGH_PATHS:
-            self._send_json(404, {"error": "not found"})
-            return
+        # Any GET path is forwarded verbatim (mirrors do_POST passthrough), so
+        # base-URL tools probing routes beyond the classic /v1/models still work.
         try:
             conn = self._connect()
         except Exception as exc:

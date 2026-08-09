@@ -263,23 +263,15 @@ def _normalize_anthropic(usage_payload, cost_payload) -> dict:
             m["output"] += output
             m["cached"] += cached_tot
             m["cost"] += cost
+    # Cost is best-effort and only ever taken from clearly-USD-named fields
+    # (total_cost_usd / cost_usd). Anthropic's cost_report `amount` values are
+    # documented in cents in some doc versions; guessing the unit could inflate
+    # the total ~100x, so ambiguous amounts are deliberately skipped.
     for entry in _extract_buckets(cost_payload):
-        line_items = entry.get("line_items")
-        if isinstance(line_items, list):
-            for li in line_items:
-                if not isinstance(li, dict):
-                    continue
-                amount = li.get("amount")
-                if isinstance(amount, dict):
-                    if str(amount.get("currency", "usd")).lower() == "usd":
-                        totals["cost"] += _as_float(amount.get("value"))
-                else:
-                    totals["cost"] += _as_float(amount)
-        else:
-            totals["cost"] += (
-                _as_float(entry.get("total_cost_usd"))
-                or _as_float(entry.get("cost"))
-            )
+        totals["cost"] += (
+            _as_float(entry.get("total_cost_usd"))
+            or _as_float(entry.get("cost_usd"))
+        )
     return {"totals": totals, "models": models}
 
 
@@ -392,20 +384,28 @@ def _fetch_openai(credentials: dict, lookback_days: int) -> dict:
 
 
 def _fetch_openai_with_refresh(credentials: dict, lookback_days: int) -> dict:
-    """Fetch OpenAI usage; on auth failure with an OAuth refresh token, refresh
-    once and retry before giving up."""
+    """Fetch OpenAI usage with OAuth token lifecycle handling.
+
+    - Proactively refreshes an OAuth token whose expires_at has passed.
+    - On an auth failure with a refresh token available, refreshes once and
+      retries before giving up.
+    """
+    creds = credentials
+    if (
+        creds.get("type") == "oauth"
+        and creds.get("refresh_token")
+        and creds.get("expires_at") is not None
+        and creds["expires_at"]
+        < datetime.datetime.now(datetime.timezone.utc).timestamp()
+    ):
+        creds = dict(creds, access_token=_oauth_refresh(creds["refresh_token"]))
     try:
-        return _fetch_openai(credentials, lookback_days)
+        return _fetch_openai(creds, lookback_days)
     except ProviderAuthError:
-        if (
-            credentials.get("type") != "oauth"
-            or not credentials.get("refresh_token")
-        ):
+        if creds.get("type") != "oauth" or not creds.get("refresh_token"):
             raise
-        fresh = _oauth_refresh(credentials["refresh_token"])
-        return _fetch_openai(
-            dict(credentials, access_token=fresh), lookback_days
-        )
+        fresh = _oauth_refresh(creds["refresh_token"])
+        return _fetch_openai(dict(creds, access_token=fresh), lookback_days)
 
 
 # --- write path ------------------------------------------------------------

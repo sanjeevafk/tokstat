@@ -49,7 +49,7 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/models":
             self._json({"object": "list", "data": [{"id": "llama3.1:8b"}]})
         else:
-            self._json({"error": "not found"}, status=404)
+            self._json({"error": "not found", "upstream": True}, status=404)
 
     def _json(self, payload, status=200):
         raw = json.dumps(payload).encode("utf-8")
@@ -293,6 +293,43 @@ class TestProxy(unittest.TestCase):
             "/v1/responses",
         )
         self.assertEqual(u2, {"input": 9, "output": 2})
+
+    def test_content_length_counts_responses_delta(self):
+        from tokstat.proxy import ProxyHandler
+
+        # Streaming chunks carry text in `delta`; used for the estimate fallback.
+        self.assertEqual(
+            ProxyHandler._content_length({"delta": "hello"}, "/v1/responses"), 5
+        )
+        self.assertEqual(
+            ProxyHandler._content_length({"output_text": "hi"}, "/v1/responses"), 2
+        )
+
+    def test_passthrough_requires_content_length(self):
+        # Chunked (Transfer-Encoding) request bodies cannot be re-read safely;
+        # reject with 411 rather than forward an empty body upstream.
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", self.proxy.port, timeout=10)
+        try:
+            conn.putrequest("POST", "/v1/other")
+            conn.putheader("Transfer-Encoding", "chunked")
+            conn.endheaders()
+            conn.send(b"5\r\nhello\r\n0\r\n\r\n")
+            resp = conn.getresponse()
+            status = resp.status
+            resp.read()
+        finally:
+            conn.close()
+        self.assertEqual(status, 411)
+        self.assertEqual(self._drain(), [])
+
+    def test_unknown_get_path_forwarded(self):
+        # GET passthrough is symmetric with POST: the upstream's 404 is
+        # forwarded verbatim, not replaced by a proxy-generated one.
+        status, raw = self._get("/v1/other")
+        self.assertEqual(status, 404)
+        self.assertTrue(json.loads(raw)["upstream"])
 
 
 class TestProxyStatus(unittest.TestCase):
