@@ -194,6 +194,7 @@ class GeminiAntigravityCollector(BaseCollector):
         current_model = settings_model
         current_provider = settings_provider
         accumulated_context_tokens = 0
+        last_turn_new_inputs = 0
         last_step_index = -1
 
         for line_num, line in enumerate(lines):
@@ -213,6 +214,7 @@ class GeminiAntigravityCollector(BaseCollector):
             # the previous index unexpectedly) — reset the context accumulator.
             if isinstance(step_idx, int) and step_idx <= 0 and last_step_index > 0:
                 accumulated_context_tokens = 0
+                last_turn_new_inputs = 0
             last_step_index = step_idx if isinstance(step_idx, int) else last_step_index
 
             # Check for model switch tags in content
@@ -230,22 +232,29 @@ class GeminiAntigravityCollector(BaseCollector):
             )
             step_tokens = content_tokens + tool_tokens
 
-            # Accumulate prompt context for subsequent turns
-            accumulated_context_tokens += step_tokens
+            # User or tool outputs feed into the next model turn's new input
+            if step.get("source") != "MODEL":
+                accumulated_context_tokens += step_tokens
+                last_turn_new_inputs += step_tokens
+                continue
 
-            if step.get("source") != "MODEL" or step.get("status") != "DONE":
+            if step.get("status") != "DONE":
                 continue
 
             created_at = step.get("created_at")
             if not created_at:
                 continue
 
-            # Input tokens = accumulated conversation context presented to model
-            input_est = max(1, accumulated_context_tokens)
+            # Delta input: new prompt content since last turn (or at least 1)
+            input_est = max(1, last_turn_new_inputs)
             output_est = max(1, step_tokens)
 
-            # Estimate cache read tokens for multi-turn prefix reuse
-            cache_read_est = max(0, input_est - step_tokens) if input_est > step_tokens else 0
+            # Cumulative prior context is cached prefix
+            cache_read_est = max(0, accumulated_context_tokens)
+
+            # Accumulate model output into context for subsequent turns
+            accumulated_context_tokens += step_tokens
+            last_turn_new_inputs = 0
 
             # dedup_key must include created_at: dedup_key is UNIQUE in the schema
             # and step_index rolls back to 0 on session restarts (and on file

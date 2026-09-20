@@ -90,10 +90,22 @@ class ClaudeCodeCollector(BaseCollector):
 
         events = []
         for req_id, e in by_request.items():
-            input_tok = e["input_tokens"] if e["input_tokens"] > 1 else (e["cache_create"] or 0)
+            raw_input = e["input_tokens"]
             cache_read = e["cache_read"]
+            cache_write = e["cache_create"]
             output_tok = e["output_tokens"]
-            total = input_tok + output_tok + cache_read
+
+            # If input_tokens is streaming placeholder (0/1), base input is 0 (all in cache_create)
+            if raw_input <= 1 and cache_write > 0:
+                input_tok = 0
+            elif raw_input >= cache_write:
+                # Anthropic top-level input_tokens includes cache_creation_input_tokens;
+                # deduct cache_write so input_tok is purely non-cached prompt tokens.
+                input_tok = raw_input - cache_write
+            else:
+                input_tok = raw_input
+
+            total = input_tok + output_tok + cache_read + cache_write
             if total <= 0:
                 continue
             events.append({
@@ -110,7 +122,7 @@ class ClaudeCodeCollector(BaseCollector):
                 "input_tokens": input_tok,
                 "output_tokens": output_tok,
                 "cache_read_tokens": cache_read,
-                "cache_write_tokens": e["cache_create"],
+                "cache_write_tokens": cache_write,
                 "total_tokens": total,
                 "cost_usd": 0.0,
                 "requests": 1,

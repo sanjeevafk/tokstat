@@ -24,7 +24,6 @@ QUERY_ALL_EVENTS = """
     FROM usage_events
     WHERE occurred_at IS NOT NULL
       AND event_type = 'message_usage'
-      AND total_tokens > 0
     ORDER BY occurred_at ASC
 """
 
@@ -34,17 +33,18 @@ QUERY_DAILY_ROLLUP = """
         coalesce(workspace_id, 'Global/No Project') as project,
         coalesce(agent_name, 'Unknown') as agent,
         coalesce(model_raw, 'System/Tools') as model,
+        status,
         sum(coalesce(input_tokens, 0)) as input,
         sum(coalesce(output_tokens, 0)) as output,
         sum(coalesce(cache_read_tokens, 0)) as cache_read,
         sum(coalesce(cache_write_tokens, 0)) as cache_write,
         sum(coalesce(total_tokens, 0)) as total,
+        sum(coalesce(cost_usd, 0.0)) as cost,
         count(*) as requests
     FROM usage_events
     WHERE occurred_at IS NOT NULL
       AND event_type = 'message_usage'
-      AND total_tokens > 0
-    GROUP BY day, project, agent, model
+    GROUP BY day, project, agent, model, status
     ORDER BY day ASC
 """
 
@@ -55,11 +55,11 @@ QUERY_PROJECTS_BREAKDOWN = """
         sum(coalesce(output_tokens, 0)) as output,
         sum(coalesce(cache_read_tokens, 0)) as cache_read,
         sum(coalesce(total_tokens, 0)) as total,
+        sum(coalesce(cost_usd, 0.0)) as cost,
         count(*) as requests,
         count(distinct coalesce(session_id, 'No Session')) as sessions
     FROM usage_events
     WHERE event_type = 'message_usage'
-      AND total_tokens > 0
     GROUP BY project
     ORDER BY total DESC
 """
@@ -74,10 +74,10 @@ QUERY_SESSIONS_BREAKDOWN = """
         sum(coalesce(output_tokens, 0)) as output,
         sum(coalesce(cache_read_tokens, 0)) as cache_read,
         sum(coalesce(total_tokens, 0)) as total,
+        sum(coalesce(cost_usd, 0.0)) as cost,
         count(*) as requests
     FROM usage_events
     WHERE event_type = 'message_usage'
-      AND total_tokens > 0
     GROUP BY project, session
     ORDER BY start_time DESC
 """
@@ -85,13 +85,14 @@ QUERY_SESSIONS_BREAKDOWN = """
 QUERY_TOOL_TOTALS = """
     SELECT 
         coalesce(agent_name, 'Unknown') as agent,
+        status,
         sum(coalesce(input_tokens, 0)) as input,
         sum(coalesce(output_tokens, 0)) as output,
         sum(coalesce(cache_read_tokens, 0)) as cache_read,
         sum(coalesce(total_tokens, 0)) as total,
+        sum(coalesce(cost_usd, 0.0)) as cost,
         count(*) as requests
     FROM usage_events
     WHERE event_type = 'message_usage'
-      AND total_tokens > 0
-    GROUP BY agent
+    GROUP BY agent, status
 """

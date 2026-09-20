@@ -239,22 +239,33 @@ def fetch_tool_totals():
         tools_data = {}
         for r in rows:
             agent = r['agent']
-            tools_data[agent] = {
+            status = r.get('status', 'ok')
+            key = f"{agent}:{status}" if status != 'ok' else agent
+            tools_data[key] = {
+                "agent": agent,
+                "status": status,
                 "input": r['input'],
                 "output": r['output'],
                 "cache_read": r['cache_read'],
                 "total": r['total'],
+                "cost": r.get('cost', 0.0),
                 "requests": r['requests']
             }
 
-        # Merge Copilot
-        cop_in, cop_out, cop_tot, cop_req = query_copilot_db()
-        if 'copilot' not in tools_data:
-            tools_data['copilot'] = {"input": 0, "output": 0, "cache_read": 0, "total": 0, "requests": 0}
-        tools_data['copilot']['input'] += cop_in
-        tools_data['copilot']['output'] += cop_out
-        tools_data['copilot']['total'] += cop_tot
-        tools_data['copilot']['requests'] += cop_req
+        # Only merge Copilot from db if not already ingested in usage_events
+        if 'copilot' not in tools_data and 'copilot:estimated' not in tools_data:
+            cop_in, cop_out, cop_tot, cop_req = query_copilot_db()
+            if cop_tot > 0:
+                tools_data['copilot'] = {
+                    "agent": "copilot",
+                    "status": "estimated",
+                    "input": cop_in,
+                    "output": cop_out,
+                    "cache_read": 0,
+                    "total": cop_tot,
+                    "cost": 0.0,
+                    "requests": cop_req
+                }
 
         return tools_data
     except Exception as e:

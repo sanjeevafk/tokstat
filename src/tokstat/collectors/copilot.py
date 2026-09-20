@@ -21,10 +21,25 @@ class CopilotCollector(BaseCollector):
         in_tok, out_tok, total, reqs = db_access.query_copilot_db()
         if total <= 0:
             return [], None
-        day = datetime.date.today().isoformat()
+
+        last_total = bookmark.get("last_total", 0)
+        last_in = bookmark.get("last_in", 0)
+        last_out = bookmark.get("last_out", 0)
+        last_reqs = bookmark.get("last_reqs", 0)
+
+        delta_total = max(0, total - last_total)
+        delta_in = max(0, in_tok - last_in)
+        delta_out = max(0, out_tok - last_out)
+        delta_reqs = max(0, (reqs or 0) - last_reqs)
+
+        # If no new tokens or requests since last poll, skip
+        if delta_total <= 0 and delta_reqs <= 0:
+            return [], bookmark
+
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         event = {
             "event_id": None,
-            "occurred_at": day + "T00:00:00Z",
+            "occurred_at": now,
             "provider_id": "github",
             "agent_name": "copilot",
             "workspace_id": "Global/No Project",
@@ -33,14 +48,20 @@ class CopilotCollector(BaseCollector):
             "event_type": "message_usage",
             "model_raw": "copilot-default",
             "model_canonical": "copilot-default",
-            "input_tokens": in_tok,
-            "output_tokens": out_tok,
+            "input_tokens": delta_in,
+            "output_tokens": delta_out,
             "cache_read_tokens": 0,
             "cache_write_tokens": 0,
-            "total_tokens": total,
+            "total_tokens": delta_total,
             "cost_usd": 0.0,
-            "requests": reqs or 1,
+            "requests": delta_reqs or 1,
             "status": "estimated",
-            "dedup_key": f"copilot-{day}",
+            "dedup_key": f"copilot-{now}",
         }
-        return [event], {"last_day": day}
+        new_bookmark = {
+            "last_total": total,
+            "last_in": in_tok,
+            "last_out": out_tok,
+            "last_reqs": reqs or 0,
+        }
+        return [event], new_bookmark
